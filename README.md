@@ -16,17 +16,18 @@ to your own provider. No backend, no account, no telemetry.
 ╭─ api ────────────[-]─┬─ session ──────────────────────────┬─ detail ─────────────────[-]─╮
 │ ▸ src                │ so far ─────────────────────────── │                              │
 │ ▸ test               │ what this session is about will ap │  nothing to show yet.        │
-│   package.json    ?  │ pear here after the first reply.   │                              │
-│   README.md       ?  │ ─[● ●]─ ────────────────────────── │  it follows the latest tool… │
+│   package.json       │ pear here after the first reply.   │                              │
+│   README.md          │ ─[● ●]─ ──────────────── [⧉ copy]  │  it follows the latest tool… │
 │                      │                                    │    read   -> file            │
 │                      │                                    │    edit   -> diff            │
 │                      │                                    │    bash   -> output          │
 │                      │                                    │                              │
 │                      │                                    │  or pick a file on the left. │
+│                      │                                    │                              │
 │                      ├───────────────── ▓░░░░░░░░░░░ ~9% ─┤                              │
 │                      │ › Ask anything, or /help           │                              │
 ├──────────────────────┴────────────────────────────────────┴──────────────────────────────┤
-│ ~/api · anthropic/claude-sonnet-4-5 · [⧉ copy]                                           │
+│ ~/api · anthropic/claude-sonnet-4-5 · tab panes · shift-tab mode · ctrl-c ×2 exit        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -59,9 +60,11 @@ alfa
 The first time, alfa asks for a model provider — paste an API key from Anthropic,
 OpenAI, or any OpenAI-compatible endpoint, and it verifies the key before saving.
 
-The first time in each folder, it asks two short questions: how the screen should
-look, and whether the folder is trusted. Both answers are stored in **your config**,
-never in the repository. Press Enter twice to take the defaults.
+The first time in each folder, a full-screen card asks two short questions: how the
+screen should look — each option drawn next to a small picture of itself — and whether
+the folder is trusted. Both answers are stored in **your config**, never in the
+repository. Press Enter twice to take the defaults, and `/setting` changes any of it
+later.
 
 Then just talk to it:
 
@@ -86,7 +89,9 @@ Beyond the obvious ones, that means it can:
   it later. Background processes are killed when alfa exits, not orphaned.
 - **Send out subagents** — `task` spawns a subagent with its own context window.
   Useful when a question needs a whole subtree read but the answer is a paragraph.
-  With `/agentflow` you can fan several out at once and pipeline them.
+  `/agentflow` raises the ceiling to a hundred and tells it to work in parallel by
+  default. It still edits files and runs commands itself; what changes is how much
+  it will have going at once.
 - **Stop and ask you** — when it hits a real fork in the road it asks a question
   instead of guessing, and waits.
 - **Remember across sessions** — notes it writes go in `.alfa/memory/` and load
@@ -102,6 +107,12 @@ Every tool call passes a gate. Reads are free. Anything that writes, deletes, or
 reaches the network is classified, and the classification is shown to you in full
 — for shell commands, each piece of a pipeline on its own line, not squashed into
 one string you would scan and approve.
+
+The prompt takes `⏎` to allow and `esc` to reject, and lists those two before the
+letter keys `y` / `n`. That ordering is deliberate: a CJK input method sits between
+your keyboard and the terminal and swallows the letter keys, so `y` never arrives —
+`⏎` and `esc` are the two it cannot touch. If composed text does land on the prompt,
+it says so instead of doing nothing.
 
 Three modes, switched with `shift-tab` or `/permission`:
 
@@ -151,7 +162,7 @@ Manage it with `/trust`.
 
 | key | |
 |---|---|
-| `enter` | send — queues if a turn is already running |
+| `enter` | send — queues if a turn is already running. On a permission prompt it allows once |
 | `ctrl-j` | newline |
 | `esc` | interrupt the turn; otherwise back out one level |
 | `tab` | move between panes — typing always jumps back to the input |
@@ -159,6 +170,7 @@ Manage it with `/trust`.
 | `/` `@` | command palette · mention a file |
 | `ctrl-b` `ctrl-p` `ctrl-]` | file tree · plan · detail pane |
 | `ctrl-y` | copy — code blocks, the reply, your message, the session |
+| `/setting` | every setting on one screen, API keys included |
 | `ctrl-l` | repaint the screen |
 | `ctrl-o` `ctrl-r` | lock the detail pane · rescan the tree |
 | `ctrl-c` | clear input; twice on an empty line to exit |
@@ -169,20 +181,26 @@ Full-screen terminal apps capture the mouse, which breaks drag-select — and ev
 when you get it, you have selected the *screen*: borders, wrapped lines, and bits
 of the neighbouring pane.
 
-`ctrl-y` (or the `[⧉ copy]` chip in the status bar) lists what there is to copy
-and takes the text from the session store instead: each code block in the last
-reply, the reply itself, your last message, or the whole conversation. It copies
-over OSC 52, so it works the same over SSH. In tmux you need
-`set -g set-clipboard on`.
+`ctrl-y` — or the `[⧉ copy]` chip at the right-hand end of the line the little robot
+sits on — lists what there is to copy and takes the text from the session store
+instead: each code block in the last reply, the reply itself, your last message, or
+the whole conversation. That line sits directly above what was just said, which is
+where you are looking when you want to take it. It copies over OSC 52, so it works
+the same over SSH. In tmux you need `set -g set-clipboard on`.
 
 ## Commands
 
-`/help` `/context` `/compact` `/check` `/init` `/model` `/view`
+`/setting` `/help` `/context` `/compact` `/check` `/init` `/model` `/view`
 `/language` `/permission` `/trust` `/think` `/agentflow` `/mcp` `/skills`
 `/resume` `/summary` `/clear` `/history-clean` `/reset` `/upgrade` `/exit`
 
 A few worth knowing:
 
+- **`/setting`** puts all of the above on one screen — view, side panels, trust,
+  permission mode, thinking, agentflow, auto-compact, language, the model, and your
+  API keys. Arrow keys change a value in place; the individual commands still work.
+- **`/model`** with no argument opens the model list with the cursor already on the
+  one in use. Switching keeps the whole conversation.
 - **`/init`** writes an `AGENTS.md` for the repository by actually reading it —
   how to build, how to test, which conventions matter.
 - **`/compact`** folds a long session into a handoff summary when the context
@@ -217,7 +235,8 @@ Two files, deliberately separate:
 
 Any OpenAI-compatible endpoint works — a local llama.cpp or Ollama server, a
 gateway, a hosted provider. Editing this file by hand is a supported way to use
-alfa, so errors in it name the field and say what was expected.
+alfa, so errors in it name the field and say what was expected. `/setting` writes
+to the same two files; nothing is hidden from you.
 
 Environment overrides: `ALFA_KEY_<PROVIDER>`, `ALFA_BASE_URL_<PROVIDER>`,
 `ALFA_MODEL`, `ALFA_SHELL`, `ALFA_DEBUG=1`.
