@@ -135,13 +135,31 @@ export function recallChip(label: string): string {
  * 开机横幅说过一次就滚走了,而这个开关会一直生效。
  */
 export function inputDivider(width: number, note = "", lead = ""): string {
-  const head = lead.length > 0 ? theme.dim(T_RIGHT + H) + " " + lead + " " : theme.dim(T_RIGHT)
-  const used = lead.length > 0 ? displayWidth(lead) + 4 : 1
-  if (note.length === 0) return head + theme.dim(H.repeat(Math.max(0, width - used - 1)) + T_LEFT)
+  // ⚠ 这条线一度会**超宽**。原来的写法是 `fill = max(0, width - used - w(note) - 4)`,
+  //   而 fill 夹到 0 之后总宽是 `used + w(note) + 4`,和 width 再没有关系 ——
+  //   放不下的时候它不截断,只是不再补横线。
+  //
+  //   现场:窄屏 + `/agentflow` 开着。牌子 `agentflow` 占 9 列(used = 13),
+  //   量表按 `ruleWidth - 8` 算(调用方不知道左边还挂着一块牌子),两边加起来
+  //   稳定超出十几列。而合成器里超宽的一行会把右边框顶出去 —— README 那「四条
+  //   规矩」的第一条就是这个。所以宽度在**这里**兜住,不指望调用方算对。
+  const room = Math.max(0, width)
+  // 左端那块牌子:`├─ lead ` = 1 + 1 + 1 + w(lead) + 1。装不下就整块不要 ——
+  // 一个被截成 `agent…` 的模式牌既读不出是什么,又照样占着位置
+  const leadWidth = lead.length > 0 ? displayWidth(lead) + 4 : 0
+  const showLead = leadWidth > 0 && leadWidth + 1 <= room
+  const head = showLead ? theme.dim(T_RIGHT + H) + " " + lead + " " : theme.dim(T_RIGHT)
+  const used = showLead ? leadWidth : 1
+
   // ├ + 横线 + ` note ` + 一根横线 + ┤。末尾那根不能省 —— 贴着 ┤ 的字会和
   // 边框糊成一片(和上边框的收起按钮同一条理由,见 renderTitle)
-  const fill = Math.max(0, width - used - displayWidth(note) - 4)
-  return head + theme.dim(H.repeat(fill)) + " " + note + " " + theme.dim(H + T_LEFT)
+  // 右端量表最多能占多宽:总宽减掉左端,再减掉它自己那 4 格边距和收口
+  const noteRoom = room - used - 4
+  const shown = note.length > 0 && noteRoom > 0 ? truncateToWidth(note, noteRoom) : ""
+  if (shown.length === 0) return head + theme.dim(H.repeat(Math.max(0, room - used - 1)) + T_LEFT)
+
+  const fill = Math.max(0, room - used - displayWidth(shown) - 4)
+  return head + theme.dim(H.repeat(fill)) + " " + shown + " " + theme.dim(H + T_LEFT)
 }
 
 /**

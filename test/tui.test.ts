@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { computeLayout, LAYOUT_LIMITS } from "../src/tui/layout.ts"
+import { inputDivider } from "../src/tui/chrome.ts"
 import { JobsPane, JOB_LINGER_MS } from "../src/tui/panes/jobs.ts"
 import { AgentsPane } from "../src/tui/panes/agents.ts"
 import type { JobSnapshot } from "../src/tool/bash/jobs.ts"
@@ -2416,5 +2417,101 @@ describe("★ ctrl-y 复制单子", () => {
     } finally {
       dispose()
     }
+  })
+})
+
+// ─────────────────────────────────────────────── 窄屏那一段的断崖
+
+/**
+ * ★ 86–95 列之间,把窗口**拉宽一列**会让对话栏塌掉一半。
+ *
+ * 「留哪几栏」是拿 `TREE.min`(16)算的,而分配拿的是 `TREE.ideal`(26) ——
+ * 差的那 10 列没有别的来源,全从对话身上出。85 列时右栏被判成塞不下、整个
+ * 收掉,对话拿到 56;86 列时三栏都留,对话只剩 26,而 `CHAT_MIN` 写着 36。
+ *
+ * 而 86~95 正是很常见的 tmux 分屏宽度。
+ */
+describe("★ 窄屏时对话栏的下限不许被破", () => {
+  const { CHAT_MIN } = LAYOUT_LIMITS
+
+  test("★ 80–160 列全程 chat ≥ CHAT_MIN", () => {
+    const broken: Array<{ width: number; chat: number }> = []
+    for (let width = 80; width <= 160; width++) {
+      const l = computeLayout({ width, height: 40, inputHeight: 1 })
+      if (l.chat.width < CHAT_MIN) broken.push({ width, chat: l.chat.width })
+    }
+    expect(broken).toEqual([])
+  })
+
+  /**
+   * 断崖的形状。加宽一列而对话**变窄**,只允许发生在**多出一栏**的那一刻 ——
+   * 那时候变窄是这一栏的代价,读得出因果。而 86 列那次不是:三栏在 85→86
+   * 之间从两栏变三栏,同时对话掉到了 26,**低于它自己写着的下限**。
+   *
+   * 所以这里守的是「变窄必须有理由」,不是「永远不变窄」。
+   */
+  test("★ 对话变窄只能是因为多出了一栏", () => {
+    const bad: Array<{ width: number; from: number; to: number; panes: number }> = []
+    let previous = { chat: 0, panes: 0 }
+    for (let width = 80; width <= 160; width++) {
+      const l = computeLayout({ width, height: 40, inputHeight: 1 })
+      const panes = 1 + (l.tree ? 1 : 0) + (l.detail ? 1 : 0)
+      if (width > 80 && l.chat.width < previous.chat && panes <= previous.panes) {
+        bad.push({ width, from: previous.chat, to: l.chat.width, panes })
+      }
+      previous = { chat: l.chat.width, panes }
+    }
+    expect(bad).toEqual([])
+  })
+
+  test("86 列上三栏都在,而且三条下限一条不破", () => {
+    const l = computeLayout({ width: 86, height: 40, inputHeight: 1 })
+    expect(l.tree).toBeDefined()
+    expect(l.detail).toBeDefined()
+    expect(l.tree!.width).toBeGreaterThanOrEqual(LAYOUT_LIMITS.TREE.min)
+    expect(l.detail!.width).toBeGreaterThanOrEqual(LAYOUT_LIMITS.DETAIL.min)
+    expect(l.chat.width).toBeGreaterThanOrEqual(CHAT_MIN)
+  })
+
+  test("宽下去之后树自己长回理想宽度", () => {
+    expect(computeLayout({ width: 160, height: 40, inputHeight: 1 }).tree!.width).toBe(LAYOUT_LIMITS.TREE.ideal)
+  })
+})
+
+/**
+ * ★ 输入框上沿那条线**超宽**。
+ *
+ * 原来是 `fill = max(0, width - used - w(note) - 4)`,而 fill 夹到 0 之后总宽
+ * 变成 `used + w(note) + 4`,和 width 再没有关系 —— 放不下的时候它不截断,
+ * 只是不再补横线。合成器里超宽的一行会把右边框顶出去(README「四条规矩」第一条)。
+ *
+ * 现场是窄屏 + `/agentflow` 开着:左端那块牌子占 9 列,而右端量表的预算是
+ * 调用方按 `ruleWidth - 8` 算的 —— 它不知道左边还挂着一块牌子。
+ */
+describe("★ 输入框上沿那条线永远不超宽", () => {
+  const gauge = "▓▓░░░░░░░░░ ~18%"
+  const flow = "agentflow 3/6"
+
+  test("★ 窄到放不下时截断,而不是把边框顶出去", () => {
+    for (let width = 8; width <= 60; width++) {
+      for (const note of ["", gauge]) {
+        for (const lead of ["", flow]) {
+          const line = stripAnsi(inputDivider(width, note, lead))
+          expect({ width, note, lead, got: displayWidth(line) }).toEqual({ width, note, lead, got: width })
+        }
+      }
+    }
+  })
+
+  test("装得下的时候量表照旧完整出现", () => {
+    expect(stripAnsi(inputDivider(60, gauge, flow))).toContain(gauge)
+    expect(stripAnsi(inputDivider(60, gauge, flow))).toContain(flow)
+  })
+
+  // 一个被截成 `agent…` 的模式牌既读不出是什么,又照样占着位置
+  test("★ 牌子放不下就整块不要,不截半个", () => {
+    const line = stripAnsi(inputDivider(10, gauge, flow))
+    expect(line).not.toContain("agent")
+    expect(displayWidth(line)).toBe(10)
   })
 })

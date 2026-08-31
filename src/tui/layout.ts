@@ -211,7 +211,28 @@ export function computeLayout(input: LayoutInput): Layout {
   const detailShown = wantDetail || railDetail
   const panes = 1 + (treeShown ? 1 : 0) + (detailShown ? 1 : 0)
   const content = inner(panes)
-  const treeWidth = wantTree ? clamp(TREE.ideal, TREE.min, Math.min(TREE.max, content - CHAT_MIN)) : railTree ? RAIL : 0
+  /**
+   * ★ 树最宽能到多少。上限里**必须扣掉右栏要占的那一份**。
+   *
+   * ── 86 到 95 列之间那个断崖 ──
+   * 上面「留哪几栏」是拿 `TREE.min`(16)算的:三栏都按最小值塞得下就留三栏。
+   * 而这里分配拿的是 `TREE.ideal`(26) —— 差的那 10 列没有别的来源,全从对话
+   * 身上出。86 列时的实际结果是 tree 26 / detail 30 / **chat 26**,而 CHAT_MIN
+   * 写着 36。85 列反而好:那时候右栏被判成塞不下、整个收掉,对话拿到 56 列。
+   * 也就是说**把窗口拉宽一列,对话栏塌掉一半** —— 而 86~95 正是很常见的
+   * tmux 分屏宽度。
+   *
+   * 修法不是"提前收掉右栏",是让树**缩回它答应过的那个最小值**:决定阶段说的
+   * 是"按最小值塞得下",那分配阶段就得兑现这句话。86 列 → 16 / 30 / 36,
+   * 三条下限一条不破;宽下去之后树自己长回 26。
+   *
+   * 下界那个 `Math.max(TREE.min, …)` 是保险:上面的判断已经保证了减完不会
+   * 低于 TREE.min,但 clamp(v, lo, hi) 在 hi < lo 时返回的是 hi —— 一旦哪天
+   * 判断改了,这里会静默地交出一个比最小值还窄、甚至是负数的宽度。
+   */
+  const detailFloor = wantDetail ? DETAIL.min : railDetail ? RAIL : 0
+  const treeCap = Math.max(TREE.min, Math.min(TREE.max, content - CHAT_MIN - detailFloor))
+  const treeWidth = wantTree ? clamp(TREE.ideal, TREE.min, treeCap) : railTree ? RAIL : 0
   const detailRoom = content - treeWidth - CHAT_MIN
   const detailWidth = wantDetail
     ? clamp(Math.min(DETAIL.ideal, detailRoom), DETAIL.min, DETAIL.max)
