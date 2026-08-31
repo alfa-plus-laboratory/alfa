@@ -1576,6 +1576,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // 货架上这次没被点名的。见 mcp/config.ts 的 shelf —— 翻不到的货架等于没有
     mcpShelf: () => mcpConfig.shelf,
     mcpProblems: () => mcpConfig.problems,
+    /**
+     * 收摊。**限时**跑,见 SIGTERM 那条注释。
+     *
+     * 挂在 deps 上是因为唯一装了 SIGTERM 监听的地方在 fullscreen_ 里,而
+     * `shutdown` 是 main() 的闭包 —— 那条路上 `process.exit()` 会把 main()
+     * 的 finally 整个跳过,于是收摊代码一行都跑不到。
+     */
+    shutdown: async () => {
+      const forced = new Promise<void>((resolve) => setTimeout(resolve, HANGUP_SHUTDOWN_MS).unref?.())
+      await Promise.race([shutdown(), forced])
+    },
     trust: {
       state: () => trust,
       at: () => {
@@ -1999,6 +2010,8 @@ interface InteractiveDeps {
   mcpShelf(): string[]
   /** 读不出来的那几条配置。**必须有人把它们说出来** —— 见 mcpCommand 那颗星 */
   mcpProblems(): McpProblem[]
+  /** 限时收摊:杀后台任务、子 agent、MCP server,关库。见 SIGTERM 那条注释 */
+  shutdown(): Promise<void>
   /** 这个文件夹的信任那一格。见 cli/trust.ts */
   trust: {
     state(): TrustState
@@ -3738,13 +3751,26 @@ async function fullscreen_(
   // 终端被外力破坏(未捕获异常、SIGTERM)时也要还原,否则 shell 变花屏
   const rescue = () => app.dispose()
   process.on("exit", rescue)
-  // ★ 还原完**必须自己退**。挂上 SIGTERM 监听这个动作本身就顶掉了默认的"终止",
-  //   只还原不退的话,`kill` 打过来只会让它把终端收拾干净然后**接着跑** ——
-  //   于是唯一杀得死它的办法是 `kill -9`。128+15 是 shell 对被 TERM 杀死的
-  //   进程的约定退出码,保持一致,别让脚本看出区别
+  /**
+   * ★ 还原完**必须自己退**。挂上 SIGTERM 监听这个动作本身就顶掉了默认的"终止",
+   *   只还原不退的话,`kill` 打过来只会让它把终端收拾干净然后**接着跑** ——
+   *   于是唯一杀得死它的办法是 `kill -9`。128+15 是 shell 对被 TERM 杀死的
+   *   进程的约定退出码,保持一致,别让脚本看出区别。
+   *
+   * ⚠ 但**只还原终端是不够的**。这里一度是 `rescue(); process.exit(143)`,
+   *   而 `shutdown()` 是全程序唯一调 killAllJobs / subagents.killAll / mcp.close
+   *   的地方 —— 于是一次 `kill <pid>` 或者 `docker stop` 之后:模型起的 dev server
+   *   还占着端口、`npx` 起来的 MCP 进程树还在跑、子 agent 还在烧钱,全被 init
+   *   收养。而用户以为自己已经把它关掉了。
+   *
+   *   `onHangup` 那条路一直是对的(见上面),这里是漏了而不是有意的 —— 所以
+   *   照抄它:限时跑一遍收摊,到点就走。**必须限时**,因为这条路上 store 可能
+   *   正被一轮没写完的落库占着,在这儿干等下去,省掉的孤儿进程就又变成一个
+   *   挂死的进程,而这次是在 `docker stop` 的十秒宽限期里。
+   */
   const onTerm = () => {
     rescue()
-    process.exit(143)
+    void deps.shutdown().finally(() => process.exit(143))
   }
   process.on("SIGTERM", onTerm)
 
