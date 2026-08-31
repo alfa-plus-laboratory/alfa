@@ -74,10 +74,25 @@ function Install-Alfa {
         # ── 校验 ──
         # 拿不到 checksums.txt 就明说没验,而不是安静地跳过。一句没说出口的"我没验"
         # 和一次没做的校验后果一样,但前者还多骗了一次
+        #
+        # ⚠ checksums.txt **必须落盘再读**,不能用 `.Content`。
+        #
+        #   GitHub 发 release 资产用的是 `Content-Type: application/octet-stream`,
+        #   而 Windows PowerShell 5.1 的 Invoke-WebRequest 在非 text/* 时把
+        #   `.Content` 交出来的是 **Byte[]**,不是字符串。于是
+        #   `$sums -split "`n"` 会把每个字节强转成十进制字符串再切 —— 得到的是
+        #   一堆 "101" "48",`$parts[1]` 永远对不上资产名,$expected 一直是 null。
+        #
+        #   现场:二进制下载成功,紧接着报 "cannot verify … refusing to install"。
+        #   也就是说**每一次 Windows 安装都必然失败**,而 Linux 那边(curl 落盘 +
+        #   sha256sum)一直是好的 —— 所以这个洞在两个脚本里只有一边现形。
+        #
+        #   -OutFile 和下载二进制走的是同一条路,content-type 从此不参与判断。
         $expected = $null
         try {
-            $sums = (Invoke-WebRequest -Uri "$base/checksums.txt" -UseBasicParsing).Content
-            foreach ($line in ($sums -split "`n")) {
+            $sumsFile = Join-Path $tmp 'checksums.txt'
+            Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile $sumsFile -UseBasicParsing
+            foreach ($line in (Get-Content -LiteralPath $sumsFile)) {
                 $parts = $line.Trim() -split '\s+'
                 if ($parts.Count -ge 2 -and $parts[1] -eq $asset) { $expected = $parts[0].ToLower() }
             }
