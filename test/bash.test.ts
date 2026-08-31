@@ -4,6 +4,7 @@ import { BashTool } from "../src/tool/bash.ts"
 import { MAX_BYTES, MAX_LINES, OutputCollector } from "../src/tool/bash/output.ts"
 import { createToolContext } from "../src/tool/context.ts"
 import type { AskInput } from "../src/tool/types.ts"
+import { streamDecoder } from "../src/util/decode.ts"
 
 let counter = 0
 function ctx(
@@ -203,5 +204,49 @@ describe("★ 授权请求里的工作目录", () => {
     const input = await askFor("echo hi", { root: process.cwd(), workdir: "/tmp" })
     expect(input?.metadata?.["workdir"]).toBe("/tmp")
     expect(typeof input?.metadata?.["workdirLabel"]).toBe("string")
+  })
+})
+
+/**
+ * ★ stdout 和 stderr **各一个**流式解码器。
+ *
+ * 一个多字节字符会被管道从中间劈开(64 KB 边界正好落在里面是常态),而
+ * `TextDecoder` 的 `{ stream: true }` 把半个字符的状态**存在解码器里**。
+ * 两条流共用一个的话,stdout 攒着的那半个「你」会被 stderr 的下一块接走 ——
+ * 两条流一起被弄脏,而且脏在一个和它们各自内容都无关的地方。
+ *
+ * 任何一边往 stderr 写进度、另一边输出中日韩文本的构建工具都会遇上。
+ */
+describe("★ 两条流各一个解码器", () => {
+  const you = Buffer.from("你", "utf8") // e4 bd a0
+
+  test("★ 劈开的字符在自己那条流上拼得回来,而且不弄脏另一条", () => {
+    const out = streamDecoder()
+    const err = streamDecoder()
+    let stdout = ""
+    let stderr = ""
+    stdout += out(you.subarray(0, 2)) // 半个「你」,攒在 out 里
+    stderr += err(Buffer.from("ERR\n", "utf8")) // 另一条流插进来
+    stdout += out(you.subarray(2)) // 剩下那一个字节
+    expect(stdout).toBe("你")
+    expect(stderr).toBe("ERR\n")
+  })
+
+  // 这一条演示的是**修之前**的行为:同一个解码器接两条流,两条都坏
+  test("★ 共用一个的话两条流一起坏 —— 这就是修掉的那个形状", () => {
+    const shared = streamDecoder()
+    const stdout = shared(you.subarray(0, 2)) + shared(you.subarray(2))
+    // 中间插一条 stderr,同一个解码器
+    const mixed = streamDecoder()
+    const a = mixed(you.subarray(0, 2))
+    const b = mixed(Buffer.from("ERR\n", "utf8"))
+    const c = mixed(you.subarray(2))
+    expect(stdout).toBe("你") // 不插队时是好的
+    expect(a + b + c).not.toBe("你ERR\n") // 插了队就不是了
+    expect(a + b + c).toContain("�")
+  })
+
+  test("已经是字符串的原样过 —— 别当成 latin-1 再解一遍", () => {
+    expect(streamDecoder()("你好")).toBe("你好")
   })
 })

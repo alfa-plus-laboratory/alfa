@@ -31,6 +31,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { resolveShell } from "../env/shell.ts"
 import { buildChildEnv } from "../env/whitelist.ts"
+import { streamDecoder } from "../util/decode.ts"
 
 export interface Checker {
   /** 给界面看的短名:tsc / cargo / go / custom */
@@ -153,13 +154,16 @@ export async function runCheck(
     let raw = ""
     /** 收够了就不再往内存里堆 —— 一个刷屏的检查器不该把进程撑爆 */
     let full = false
-    const collect = (chunk: Buffer | string) => {
+    // ★ `String(chunk)` 是**一次性**解码,没有跨块状态 —— 被管道劈开的那个
+    //   多字节字符两边各得到一个 U+FFFD,而且是静默的。两条流各一个流式
+    //   解码器才对(见 util/decode.ts);检查器的输出里带中日韩文本很常见
+    const collect = (decode: (chunk: Buffer | string) => string) => (chunk: Buffer | string) => {
       if (full) return
-      raw += String(chunk)
+      raw += decode(chunk)
       if (raw.length > MAX_BYTES * 8) full = true
     }
-    child.stdout?.on("data", collect)
-    child.stderr?.on("data", collect)
+    child.stdout?.on("data", collect(streamDecoder()))
+    child.stderr?.on("data", collect(streamDecoder()))
 
     let settled = false
     const finish = (outcome: CheckOutcome) => {

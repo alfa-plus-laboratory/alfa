@@ -15,6 +15,7 @@ import { spawn } from "node:child_process"
 import { relative } from "node:path"
 import { resolveShell } from "../env/shell.ts"
 import { buildChildEnv } from "../env/whitelist.ts"
+import { streamDecoder } from "../util/decode.ts"
 import { start as startBackgroundJob, type StartInput } from "./bash/jobs.ts"
 import { killGroup } from "./bash/kill.ts"
 import { MAX_BYTES, MAX_LINES, OutputCollector } from "./bash/output.ts"
@@ -231,14 +232,14 @@ export const BashTool: ToolDef<Args> = {
       windowsHide: true,
     })
 
-    const decoder = new TextDecoder("utf-8")
-    const onData = (chunk: Buffer) => {
-      const text = decoder.decode(chunk, { stream: true })
-      collector.push(text)
+    // ★ 两条流**各一个**解码器。共用一个的话,一个被管道劈成两半的多字节字符
+    //   会把另一条流的内容一起弄脏 —— 理由见 util/decode.ts
+    const pump = (decode: (chunk: Buffer | string) => string) => (chunk: Buffer) => {
+      collector.push(decode(chunk))
       ctx.onProgress(collector.livePreview())
     }
-    proc.stdout?.on("data", onData)
-    proc.stderr?.on("data", onData)
+    proc.stdout?.on("data", pump(streamDecoder()))
+    proc.stderr?.on("data", pump(streamDecoder()))
 
     type Outcome = { kind: "exit"; code: number | null; signal: NodeJS.Signals | null } | { kind: "abort" } | { kind: "timeout" }
 

@@ -28,6 +28,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import type { Shell } from "../../env/shell.ts"
 import { buildChildEnv } from "../../env/whitelist.ts"
+import { streamDecoder } from "../../util/decode.ts"
 import {
   __resetNamesForTest,
   reserveName,
@@ -154,9 +155,9 @@ export async function start(input: StartInput): Promise<StartResult> {
   }
   jobs.set(id, job)
 
-  const decoder = new TextDecoder("utf-8")
-  const onData = (chunk: Buffer) => {
-    const text = decoder.decode(chunk, { stream: true })
+  // ★ 两条流各一个解码器,理由见 util/decode.ts
+  const pump = (decode: (chunk: Buffer | string) => string) => (chunk: Buffer) => {
+    const text = decode(chunk)
     job.collector.push(text)
     job.seen += text
     // 内存上限和 collector 的环形缓冲同一个量级。超了就从头砍,并把游标跟着挪 ——
@@ -168,8 +169,8 @@ export async function start(input: StartInput): Promise<StartResult> {
     }
     wake(job)
   }
-  proc.stdout?.on("data", onData)
-  proc.stderr?.on("data", onData)
+  proc.stdout?.on("data", pump(streamDecoder()))
+  proc.stderr?.on("data", pump(streamDecoder()))
 
   const settle = (code: number | null, signal: NodeJS.Signals | null) => {
     if (job.status === "exited") return
