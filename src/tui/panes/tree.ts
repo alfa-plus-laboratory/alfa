@@ -19,6 +19,7 @@ import { dirname, join, relative, sep } from "node:path"
 import { theme } from "../../cli/theme.ts"
 import { displayWidth, truncateToWidth } from "../../cli/width.ts"
 import { attachScrollbar, offsetForRow, scrollbarColumn } from "../scrollbar.ts"
+import { t } from "../../i18n/index.ts"
 
 /** 不是 git 仓库时的兜底名单。宁可少藏也别藏错,用户看不到文件会以为是 bug。 */
 const ALWAYS_HIDE = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".DS_Store"])
@@ -271,7 +272,7 @@ export class TreePane {
 
   render(width: number, height: number, focused: boolean): string[] {
     if (this.error) return [theme.red(truncateToWidth(`  ! ${this.error}`, width))]
-    if (this.rows.length === 0) return [theme.dim("  (empty)")]
+    if (this.rows.length === 0) return [theme.dim(`  ${t.treeEmpty}`)]
 
     // 键盘动过选中项才把它拉回视野;滚轮/滚动条滚出去的不算(见 follow)
     if (this.follow) {

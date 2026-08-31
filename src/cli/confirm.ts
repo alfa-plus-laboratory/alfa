@@ -161,7 +161,7 @@ export function requestLines(request: PromptRequest): string[] {
   }
 
   if (metadata["parseOk"] === false) {
-    lines.push(theme.red("! could not parse this command reliably — review the full text above"))
+    lines.push(theme.red(`! ${t.promptParseUnsure}`))
   }
 
   const reasons = request.reasons ?? []
@@ -184,12 +184,14 @@ export function requestLines(request: PromptRequest): string[] {
 export function optionsLine(request: PromptRequest): string {
   // 大写的那个 = 回车会选的那个,这是终端交互的通行约定。所以回车改成放行
   // 之后,大写必须跟着从 N 挪到 Y —— 不挪的话,这一行就在骗人
-  const parts = [theme.green("[Y] allow once")]
+  // ★ 方括号里的**键名不译**(Y / a / n / esc)—— 它们是要按下去的东西,
+  //   翻过去用户按不出来。翻的只是后面那几个词。见 i18n 那条「按键名一律不译」
+  const parts = [theme.green(`[Y] ${t.promptAllowOnce}`)]
   if (!request.forbidAlways) {
     const scope = request.alwaysPatterns[0]
-    parts.push(theme.cyan(`[a] always${scope ? ` (${scope})` : ""}`))
+    parts.push(theme.cyan(`[a] ${t.promptAlways}${scope ? ` (${scope})` : ""}`))
   }
-  parts.push(theme.dim("[n] reject  esc"))
+  parts.push(theme.dim(`[n] ${t.promptReject}  esc`))
   return parts.join("  ") + theme.dim("  › ")
 }
 
@@ -244,7 +246,7 @@ function readKey(
 
     release = keyboard.push(onKey)
     // raw 模式拿不到就别硬来 —— 逐行读会把用户的下一句输入当成答案
-    if (!keyboard.attached) return finish("reject", theme.red("n (cannot read a key)"))
+    if (!keyboard.attached) return finish("reject", theme.red(`n (${t.promptNoKeyboard})`))
     if (signal?.aborted) return onAbort()
     signal?.addEventListener("abort", onAbort, { once: true })
   })

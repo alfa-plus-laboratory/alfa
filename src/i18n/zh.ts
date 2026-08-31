@@ -387,6 +387,16 @@ export const zh: Catalog = {
   bannerShellFallback: (label: string) =>
     `命令走的是 ${label} —— 装一个 Git for Windows 就有真 bash,或者用 ALFA_SHELL 指一个`,
 
+  promptAllowOnce: "放行一次",
+  promptAlways: "以后不再问",
+  promptReject: "拒绝",
+  promptParseUnsure: "这条命令没能可靠地拆开 —— 请照上面的全文自己过一遍",
+  promptNoKeyboard: "读不到按键",
+  plainExitHint: "ctrl-c 连按两次退出",
+  treeEmpty: "(空)",
+  resetConfigWhat: "设置,以及你写过的全局 AGENTS.md",
+  resetDataWhat: "API key、所有会话、输入历史、存下来的工具输出",
+  resetProjectWhat: "这个 agent 给本项目写的便条",
   copyTitle: "复制",
   copyChip: "⧉ 复制",
   copyCode: "代码",

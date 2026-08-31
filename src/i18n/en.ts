@@ -517,6 +517,19 @@ export const en = {
   bannerWindowValue: (window: string, budget: string) => `${window} · ${budget} usable`,
 
   // ─────────────────────────────────────────── 复制(ctrl-y)。见 tui/panes/copy.ts
+  // ── 绕过 t.* 写死过的那几处。★ 键名(Y/a/n、ctrl-c)一律不译 ──
+  /** 权限框那一行。**两个宿主共用**(--plain 和全屏),见 cli/confirm.ts */
+  promptAllowOnce: "allow once",
+  promptAlways: "always",
+  promptReject: "reject",
+  promptParseUnsure: "could not parse this command reliably — review the full text above",
+  promptNoKeyboard: "cannot read a key",
+  /** --plain 状态行。全屏那边走 keysHint,同一句话两处写法一度不一样 */
+  plainExitHint: "ctrl-c ×2 to exit",
+  treeEmpty: "(empty)",
+  resetConfigWhat: "settings, and the global AGENTS.md if you wrote one",
+  resetDataWhat: "API keys, every session, input history, saved tool output",
+  resetProjectWhat: "notes this agent wrote about this project",
   copyTitle: "copy",
   /** 状态行上那块常驻的牌子。八列,见 App.statusLine 那颗星 */
   copyChip: "⧉ copy",

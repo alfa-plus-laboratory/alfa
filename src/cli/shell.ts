@@ -306,8 +306,10 @@ export class Shell {
     if (spent.length > 0) bits.push(theme.dim(spent))
     const mode = this.deps.mode?.()
     if (mode && mode !== "default") bits.push(theme.dim(modeInfo(mode).label))
-    if (this.queued.length > 0) bits.push(theme.dim(`${this.queued.length} queued`))
-    if (!this.busy) bits.push(theme.dim("ctrl-c ×2 to exit"))
+    // 全屏那边这两句一直走 i18n(queuedStatus / keysHint),而 --plain 这边
+    // 写死了英文 —— 同一件事在两个形态下说不同的语言
+    if (this.queued.length > 0) bits.push(theme.dim(t.queuedStatus(this.queued.length)))
+    if (!this.busy) bits.push(theme.dim(t.plainExitHint))
     const left = "  " + bits.join(theme.dim(" · "))
     if (this.note.length === 0) return truncateToWidth(left, width)
     return truncateToWidth(left + theme.yellow(`   ${this.note}`), width)

@@ -401,6 +401,16 @@ export const ja: Catalog = {
   bannerShellFallback: (label: string) =>
     `コマンドは ${label} 経由で実行されます —— Git for Windows を入れると本物の bash が使えます(ALFA_SHELL でも指定可)`,
 
+  promptAllowOnce: "1 回だけ許可",
+  promptAlways: "以後は聞かない",
+  promptReject: "拒否",
+  promptParseUnsure: "このコマンドを確実に解析できません —— 上の全文を自分で確認してください",
+  promptNoKeyboard: "キーを読み取れません",
+  plainExitHint: "ctrl-c 2 回で終了",
+  treeEmpty: "(空)",
+  resetConfigWhat: "設定と、書いたことがあればグローバルの AGENTS.md",
+  resetDataWhat: "API キー、全セッション、入力履歴、保存済みのツール出力",
+  resetProjectWhat: "この agent がこのプロジェクトについて書いたメモ",
   copyTitle: "コピー",
   copyChip: "⧉ コピー",
   copyCode: "コード",

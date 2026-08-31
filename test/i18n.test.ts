@@ -21,6 +21,8 @@ import {
 } from "../src/i18n/index.ts"
 import { commands, complete } from "../src/cli/commands.ts"
 import { modeInfo } from "../src/permission/mode.ts"
+import { optionsLine } from "../src/cli/confirm.ts"
+import { stripAnsi } from "../src/cli/width.ts"
 
 const started = currentInterfaceLanguage()
 afterAll(() => setInterfaceLanguage(started))
@@ -159,5 +161,58 @@ describe("/language 的两级补全", () => {
   test("第一级选完自动补空格 —— 后面还有一级", () => {
     const found = complete("/language", 9)
     expect(found?.items[0]?.more).toBe(true)
+  })
+})
+
+/**
+ * ★ 绕过 `t.*` 直接写死的英文。
+ *
+ * 三份目录的 key 是完全对齐的(类型盯着),所以漏的从来不是「某个 key 没翻」,
+ * 而是**某一句话压根没走这套机制**。这类漏最扎眼的地方是权限框:
+ * 它是这个程序里唯一「用户来不及看清就按下去」代价最高的界面,而
+ * `optionsLine` 是 --plain 和全屏**共用**的那一份。
+ *
+ * 还有一类是「同一件事在两个形态下说不同的语言」:`--plain` 的状态行把
+ * 「排队几条」和「连按两次退出」写死成英文,而全屏那边一直走 i18n。
+ *
+ * 判据是**切了语言之后这句话真的变了**,不是「有没有一个 key」。
+ */
+describe("★ 界面文案一句都不许绕过 i18n", () => {
+  const request = {
+    tool: "bash",
+    patterns: ["bash:rm"],
+    alwaysPatterns: ["bash:rm"],
+    metadata: { command: "rm -rf x" },
+  } as unknown as Parameters<typeof optionsLine>[0]
+
+  test("★ 权限框那一行 —— 两个宿主共用的那一份", () => {
+    setInterfaceLanguage("en")
+    const english = optionsLine(request)
+    setInterfaceLanguage("zh")
+    const chinese = optionsLine(request)
+    expect(english).not.toBe(chinese)
+    expect(stripAnsi(chinese)).toContain(zh.promptAllowOnce)
+    // ★ 键名不译:要按下去的东西翻过去就按不出来了
+    for (const line of [english, chinese]) {
+      expect(stripAnsi(line)).toContain("[Y]")
+      expect(stripAnsi(line)).toContain("[n]")
+      expect(stripAnsi(line)).toContain("esc")
+    }
+  })
+
+  test("★ --plain 的状态行和全屏说的是同一句话", () => {
+    setInterfaceLanguage("ja")
+    // 排队几条:全屏走 queuedStatus,--plain 一度自己拼了个英文的
+    expect(t.queuedStatus(3)).toBe(ja.queuedStatus(3))
+    expect(t.plainExitHint).toBe(ja.plainExitHint)
+    expect(t.plainExitHint).not.toBe(en.plainExitHint)
+  })
+
+  test("文件树的空目录、/reset 的三行说明都跟着语言走", () => {
+    setInterfaceLanguage("zh")
+    for (const key of ["treeEmpty", "resetConfigWhat", "resetDataWhat", "resetProjectWhat"] as const) {
+      expect(t[key]).toBe(zh[key])
+      expect(t[key]).not.toBe(en[key])
+    }
   })
 })

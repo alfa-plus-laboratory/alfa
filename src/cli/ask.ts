@@ -378,10 +378,10 @@ function readAnswer(question: Question, deps: AskDeps, output: NodeJS.WriteStrea
       if (key.ctrl && (key.name === "c" || key.name === "d")) return finish({ kind: "cancelled" }, theme.dim("^C"))
 
       if (typed !== undefined) {
-        if (key.name === "escape") return finish({ kind: "cancelled" }, theme.dim(" (dismissed)"))
+        if (key.name === "escape") return finish({ kind: "cancelled" }, theme.dim(` (${t.askDismissed})`))
         if (key.name === "enter") {
           const text = typed.trim()
-          if (text.length === 0) return finish({ kind: "cancelled" }, theme.dim(" (dismissed)"))
+          if (text.length === 0) return finish({ kind: "cancelled" }, theme.dim(` (${t.askDismissed})`))
           return finish({ kind: "typed", text }, "")
         }
         if (key.name === "backspace") {

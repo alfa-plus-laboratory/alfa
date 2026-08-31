@@ -25,6 +25,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { ALFA_DIR } from "../prompt/init.ts"
 import { configDir, dataDir } from "../util/xdg.ts"
+import { t } from "../i18n/index.ts"
 
 export interface ResetTarget {
   path: string
@@ -55,12 +56,12 @@ export function resetScope(root: string): ResetScope {
 
   const global: ResetTarget[] = []
   if (existsSync(config)) {
-    global.push({ path: config, what: "settings, and the global AGENTS.md if you wrote one", bytes: sizeOf(config) })
+    global.push({ path: config, what: t.resetConfigWhat, bytes: sizeOf(config) })
   }
   if (existsSync(data)) {
     global.push({
       path: data,
-      what: "API keys, every session, input history, saved tool output",
+      what: t.resetDataWhat,
       bytes: sizeOf(data),
       hasCredentials: existsSync(join(data, "auth.json")),
     })
@@ -68,7 +69,7 @@ export function resetScope(root: string): ResetScope {
 
   const inProject: ResetTarget[] = []
   if (existsSync(project)) {
-    inProject.push({ path: project, what: "notes this agent wrote about this project", bytes: sizeOf(project) })
+    inProject.push({ path: project, what: t.resetProjectWhat, bytes: sizeOf(project) })
   }
   return { global, project: inProject }
 }
