@@ -35,6 +35,7 @@ describe("补全命令名", () => {
       "/think",
       "/agentflow",
       "/model",
+      "/setting",
       "/resume",
       "/summary",
       "/context",

@@ -173,6 +173,15 @@ export function commands(): SlashCommand[] {
         ? { args: modelChoices.map((spec) => ({ value: spec, hint: "" })) }
         : {}),
     },
+    // 排在这一撮"改设置"的最前面。它是别的几条的**总目录** —— 记不住
+    // `/agentflow` 叫什么的人,记得住这一条
+    {
+      name: "/setting",
+      hint: t.cmdSetting,
+      // 三个名字都认。这条命令没有一个所有人都会先想到的叫法,而为了猜错
+      // 一个字母出一次「未知命令」,是拿用户的时间换我们少写两行
+      aliases: ["/settings", "/config"],
+    },
     { name: "/resume", hint: t.cmdResume },
     { name: "/summary", hint: t.cmdSummary },
     // `/content` 是别名:窗口里装的东西叫 context,但手指打成 content 的概率

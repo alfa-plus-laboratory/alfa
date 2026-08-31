@@ -59,6 +59,13 @@ import { askSummary, decisionLine, decisionSummary, promptKey, renderPrompt } fr
 import { answerLine, answerSummary, askingSummary, renderQuestion } from "./panes/question.ts"
 import { renderUpgrade, type UpgradeState } from "./panes/upgrade.ts"
 import { copyKey, copyRow, copyTargets, humanBytes, type CopyTarget } from "./panes/copy.ts"
+import {
+  cycleValue,
+  flatRows,
+  renderSettings,
+  settingsKey,
+  type SettingsSource,
+} from "./panes/settings.ts"
 import { writeClipboard } from "../cli/clipboard.ts"
 import type { PromptRequest } from "../permission/gate.ts"
 import { modeInfo, nextMode, type PermissionMode } from "../permission/mode.ts"
@@ -146,11 +153,17 @@ export interface AppDeps {
   /**
    * 跑着的时候提交的那一句。
    *
-   * 返回 true = 宿主已经把它递进正在跑的这一轮了(见 cli/main.ts 的 injectUser),
-   * 界面只管把它显示出来;false = 还得等这一轮结束(斜杠命令走这条)。
+   *   true      —— 宿主已经把它递进正在跑的这一轮了(见 cli/main.ts 的 injectUser),
+   *                界面只管把它显示出来
+   *   false     —— 还得等这一轮结束(改历史的那几条斜杠命令走这条)
+   *   "handled" —— 宿主当场就办完了,回执也已经写过了(`/agentflow` 这类
+   *                只改设置的命令)。★ 这一条**既不回显也不入队** —— 它不是
+   *                一句要说给模型听的话,而队列里多一条已经执行完的命令,
+   *                会在这一轮结束之后被再执行一遍
+   *
    * 没接就是老规矩:全部排队。
    */
-  onSubmitBusy?(text: string): boolean
+  onSubmitBusy?(text: string): boolean | "handled"
   onCancel(): void
   onExit(): void
   /** 用户在挑选浮层里选定了一场会话。取消的话这个回调不会被调用。 */
@@ -173,6 +186,11 @@ export interface AppDeps {
    * 见 tui/panes/agents.ts 文件头
    */
   agents?(): readonly JobSnapshot[]
+  /**
+   * `/setting` 那一屏的内容。**不接就是没有这一屏** —— --plain 和管道下
+   * 那套上下左右的界面根本画不出来(见 cli/settings.ts)。
+   */
+  settings?: SettingsSource
   /**
    * agentflow 开着吗,开着的话同时几个。false = 关。
    *
@@ -239,6 +257,14 @@ export class App {
    */
   private promptQueue: Pending[] = []
   private promptScroll = 0
+  /**
+   * 模态框上那句「你刚才那一下没被认出来」。
+   *
+   * 有它才会写,换成别的问题时清掉。最常见的来源是**输入法** —— 中日韩输入态下
+   * `y` 根本到不了这儿,而上屏的那几个汉字过来时,原来是静悄悄地无视。
+   * 见 panes/prompt.ts 的 promptKey。
+   */
+  private promptHint: string | undefined
   /** 补全浮层里选中第几条 */
   private completeIndex = 0
   /** 候选集变了就把选中项拨回第一条,不然会莫名其妙停在一个不相干的候选上 */
@@ -253,6 +279,18 @@ export class App {
    * 和会话浮层同一档,不是模态框:它是**用户自己开的窗**,不是别人在等他答复。
    */
   private copy: { targets: CopyTarget[]; selected: number } | undefined
+  /**
+   * 设置那一屏(`/setting`)。开着的时候所有按键都归它。
+   *
+   * ── 为什么是一摞而不是一页 ──
+   * 换模型、改密钥各自是一整页,而从它们退回来时要回到**刚才那一行**上 ——
+   * 只记一个"当前页"的话,每次返回光标都跳回第一条,连着改两样东西就得
+   * 重新找一遍位置。一摞里每一层各记各的。
+   *
+   * `typed` 有值 = 正在往密钥那一格里打字。那时候按键是另一套(见 settingsKey):
+   * 一屏里只要存在一个会收字符的格子,任何"某个字母 = 命令"的约定都会咬人。
+   */
+  private settings: { stack: Array<{ id: string; selected: number }>; typed?: string } | undefined
   /**
    * 升级浮层。开着的时候**所有按键都归它,而且它拦在最前面**。
    *
@@ -275,6 +313,14 @@ export class App {
   private titleHits: Array<{ x: number; width: number; panel: PanelName }> = []
   /** 状态行上「把它叫回来」的那几个片 */
   private statusHits: Array<{ x: number; width: number; action: StatusAction }> = []
+  /**
+   * 复制那块牌子这一帧画在**屏幕**的哪儿。
+   *
+   * session 视图下它挂在活动区那条横线右端(见 panes/chat.ts 的 copyChip);
+   * undefined = 这一帧对话栏没接手,牌子还在状态行上。这一个字段同时是那边
+   * 「要不要画」的判据 —— 两处同时出现的话,用户会以为它们是两件事。
+   */
+  private copyHit: { x: number; y: number; width: number } | undefined
 
   constructor(deps: AppDeps) {
     this.deps = deps
@@ -458,11 +504,15 @@ export class App {
   private openPrompt(pending: Pending): void {
     this.prompt = pending
     this.promptScroll = 0
+    // ★ 换了一条问题就清掉。留着的话,上一条上按错的那一下会挂在下一条的框上,
+    //   而下一条问的是另一件事 —— 那句话在那儿是无中生有
+    this.promptHint = undefined
   }
 
   private closePrompt(): void {
     this.prompt = undefined
     this.promptScroll = 0
+    this.promptHint = undefined
     const next = this.promptQueue.shift()
     if (next) this.openPrompt(next)
   }
@@ -610,7 +660,7 @@ export class App {
   private readonly onKey = (key: Key): void => {
     if (key.name === "mouse") {
       // 模态框 / 挑选浮层开着时鼠标不做事:点一下就切走焦点会让人以为问题被忽略了
-      if (!this.prompt && !this.picker && !this.upgrade && !this.copy) this.onMouse(key.mouse!)
+      if (!this.prompt && !this.picker && !this.upgrade && !this.copy && !this.settings) this.onMouse(key.mouse!)
       return this.requestFrame()
     }
 
@@ -678,6 +728,14 @@ export class App {
       return this.requestFrame()
     }
 
+    // 设置那一屏。和复制单子同一档 —— 用户自己开的窗,不是别人在等他答复。
+    // ★ 排在 vitalKey 前面:esc 在这里是"退回上一层",而不是"清空输入框";
+    //   正在往密钥格子里打字的时候更是如此,那一下 esc 是"这个 key 不粘了"
+    if (this.settings && !this.prompt) {
+      this.settingsKey(key)
+      return this.requestFrame()
+    }
+
     // 有模态框时它独占按键。**必须在 vitalKey 之前** —— 否则 Ctrl-C 会去
     // 中断 turn,而这条问题还挂着没人回答,那条工具就卡死了。
     if (this.prompt) {
@@ -685,6 +743,7 @@ export class App {
         const result = promptKey(key, this.prompt.request.forbidAlways)
         if (result.kind === "decide") this.decide(result.decision)
         else if (result.kind === "scroll") this.promptScroll = Math.max(0, this.promptScroll + result.delta)
+        else if (result.kind === "hint") this.promptHint = result.ime ? t.promptImeHint : t.promptKeyHint
         return this.requestFrame()
       }
       // 提问框:翻页归框外的这一层,别的键全归状态机(见 cli/ask.ts)。
@@ -727,7 +786,11 @@ export class App {
         if (this.busy) {
           // 先试着直接递进正在跑的这一轮。递进去的话它下一个轮次边界就看得见,
           // 不用等整件事做完(见 cli/main.ts 的 injectUser)
-          const sent = this.deps.onSubmitBusy?.(text) === true
+          const outcome = this.deps.onSubmitBusy?.(text)
+          // 宿主当场办完了(只改设置的那几条命令):回执已经写过,这里什么都
+          // 不用做 —— 入队的话它会在这一轮结束之后再执行一遍
+          if (outcome === "handled") break
+          const sent = outcome === true
           this.queued.push({ text, sent })
           // 状态行上那一格是「有几句在排」,而话本身要出现在「你说的话」那一段
           // 底下 —— 敲完就没了痕迹的话,用户第一反应是"我刚才那句去哪了"
@@ -804,6 +867,122 @@ export class App {
     this.armed = true
     this.note = t.pressCtrlCAgain
     return true
+  }
+
+  /**
+   * 打开设置那一屏。`/setting` 和 `/model`(不带参数)都走它。
+   *
+   * @param page 直接落在哪一页。`/model` 传 "model" —— 让人先看一屏设置再自己
+   *   找到模型那一行,是拿他的时间换我们少写一个参数。
+   */
+  openSettings(page = "root"): void {
+    if (!this.deps.settings) return
+    // 一摞从 root 起。直接落在子页时 root 也压在底下 —— esc 退回来看到的
+    // 是整屏设置,而不是当场关掉。那一下 esc 的原义是"上一层"
+    const stack = page === "root" ? [this.pageEntry("root")] : [this.pageEntry("root"), this.pageEntry(page)]
+    this.settings = { stack }
+    this.requestFrame()
+  }
+
+  /** 新翻开一页时光标落在哪。页自己说得出来(换模型那页要落在当前那个上) */
+  private pageEntry(id: string): { id: string; selected: number } {
+    return { id, selected: Math.max(0, this.deps.settings?.page(id)?.selected ?? 0) }
+  }
+
+  /** 设置那一屏的按键。开着的时候所有按键都归它 —— 见 onKey */
+  private settingsKey(key: Key): void {
+    const state = this.settings!
+    const top = state.stack[state.stack.length - 1]!
+    const page = this.deps.settings?.page(top.id)
+    // 页没了(provider 被删掉了之类)就退一层。停在一页画不出来的东西上,
+    // 用户看到的是一片空白加一个不响应的界面
+    if (!page) {
+      this.popSettings()
+      return
+    }
+    const rows = flatRows(page)
+    const result = settingsKey(key, { editing: state.typed !== undefined })
+    const row = rows[top.selected]
+
+    switch (result.kind) {
+      case "move":
+        top.selected = Math.max(0, Math.min(rows.length - 1, top.selected + result.delta))
+        return
+      case "cycle":
+        // ★ 方向要传下去。丢了的话 ← 和 → 都往前转 —— 两个值的开关上看不出来,
+        //   而信任(三个)、权限(三个)、语言(四个)上就是"倒不回去"
+        if (row?.kind === "choice") this.changeSetting(page.id, row, result.delta)
+        return
+      case "enter":
+        if (!row) return
+        // 灰掉的那几行:说清为什么动不了。什么都不做的话,用户会一直按
+        if (row.locked) {
+          this.note = row.hint
+          return
+        }
+        if (row.kind === "page") {
+          state.stack.push(this.pageEntry(row.id))
+          return
+        }
+        if (row.kind === "secret") {
+          state.typed = ""
+          return
+        }
+        // choice 行的回车 = 往前转一格。左右键改一样东西,而回车是这一屏上
+        // 最顺手的那个键,不该在一半的行上没反应
+        if (row.kind === "choice") this.changeSetting(page.id, row, 1)
+        else this.applySetting(page.id, row.id, row.id)
+        return
+      case "back":
+        // 打字的时候 esc 只取消这一格。整屏一起关掉的话,粘错一个字符
+        // 的代价是从头再点一遍
+        if (state.typed !== undefined) {
+          state.typed = undefined
+          return
+        }
+        this.popSettings()
+        return
+      case "close":
+        this.settings = undefined
+        return
+      case "type":
+        state.typed = (state.typed ?? "") + result.text
+        return
+      case "erase":
+        state.typed = (state.typed ?? "").slice(0, -1)
+        return
+      case "submit": {
+        const typed = state.typed ?? ""
+        state.typed = undefined
+        if (row) this.applySetting(page.id, row.id, typed)
+        return
+      }
+      case "pass":
+        return
+    }
+  }
+
+  private changeSetting(pageID: string, row: Parameters<typeof cycleValue>[0], delta = 1): void {
+    const next = cycleValue(row, delta)
+    if (next !== undefined && next !== row.value) this.applySetting(pageID, row.id, next)
+  }
+
+  private applySetting(pageID: string, rowID: string, value: string): void {
+    const result = this.deps.settings?.choose(pageID, rowID, value)
+    if (!result) return
+    // 出错也留在原地:一句在状态行上的红字 + 那一行还在,用户改得动;
+    // 关掉这一屏的话他得从头再点一遍才知道自己错在哪
+    this.note = result.error ?? result.note ?? ""
+    if (result.back) this.popSettings()
+    // 改完可能连布局都变了(侧栏、视图),重量一次
+    this.layout = this.measure()
+  }
+
+  private popSettings(): void {
+    const state = this.settings
+    if (!state) return
+    if (state.stack.length > 1) state.stack.pop()
+    else this.settings = undefined
   }
 
   /**
@@ -1092,6 +1271,12 @@ export class App {
       const onTop = event.y === this.layout.rowTop && event.x >= rail.x && event.x < rail.x + rail.width
       if (onTop || inside(rail)) return this.togglePanel(rail.panel)
     }
+    // 活动区那条横线右端的复制牌子。排在对话栏的滚动/聚焦判断**前面** ——
+    // 它画在那一栏里,后面那些判断会先把这一下当成"点了对话栏"
+    const chip = this.copyHit
+    if (chip && event.y === chip.y && event.x >= chip.x && event.x < chip.x + chip.width) {
+      return this.openCopy()
+    }
     // 状态行上的 `[ctrl-b files]` 片:点一下把那一栏叫回来
     if (event.y === this.layout.statusRow) {
       for (const hit of this.statusHits) {
@@ -1224,8 +1409,28 @@ export class App {
    *   落盘时的规则是**留下任意一栏就算开着**。这条规则说得出口:"下次进来,
    *   只要你走的时候还留着一栏,侧栏就还在。"
    */
-  private get panelsVisible(): boolean {
+  get panelsVisible(): boolean {
     return !this.hidden.has("tree") || !this.hidden.has("detail")
+  }
+
+  /**
+   * 两栏一起开 / 一起关。`/setting` 那一行走它。
+   *
+   * ★ 和 ctrl-b / ctrl-] 是**同一个真值源**:那两个键改的也是这个 hidden 集合,
+   *   而落盘那一下由 toggleSide 那边统一做。分成两套状态的话,在设置里关掉
+   *   之后按 ctrl-b,第一下会没反应
+   */
+  setPanels(visible: boolean): void {
+    if (visible) this.hidden.delete("tree"), this.hidden.delete("detail")
+    else {
+      this.hidden.add("tree")
+      this.hidden.add("detail")
+      if (this.focus === "tree" || this.focus === "detail") this.focus = "input"
+    }
+    this.overlay = undefined
+    this.layout = this.measure()
+    this.deps.onPanelsChanged?.(this.panelsVisible)
+    this.requestFrame()
   }
 
   // ───────────────────────────────────────────── 画
@@ -1343,6 +1548,13 @@ export class App {
       screen.blit(layout.jobs, this.jobs.render(layout.jobs.width, layout.jobs.height))
     }
     screen.blit(layout.chat, this.chatLines(layout))
+    // ★ 必须在**画完对话栏之后、画状态行之前**取。这一帧对话栏接没接手那块
+    //   牌子,只有它自己知道(stream 视图没有那条横线,窄了也会放不下),而
+    //   状态行要按这个结果决定自己画不画 —— 顺序错了就是两处各画一块
+    const chipAt = this.deps.chat.copyHit
+    this.copyHit = chipAt
+      ? { x: layout.chat.x + chipAt.x, y: layout.chat.y + chipAt.row, width: chipAt.width }
+      : undefined
     // 输入区上沿那条线,只跨中间栏 —— 两端各多画一列盖住竖线,才读得出
     // "这一栏底下又切了一刀"。线上挂着上下文量表:那是**打字之前**要知道的事
     const ruleWidth = layout.input.width + 2
@@ -1389,6 +1601,7 @@ export class App {
     if (this.overlay) this.drawOverlay(layout)
     if (this.picker) this.drawPicker(layout)
     if (this.copy) this.drawCopy(layout)
+    if (this.settings) this.drawSettings(layout)
     // 模态框比什么都上面
     if (this.prompt) this.drawPrompt(layout)
     // 升级框画在最后 = 盖在最上面,和它独占按键是同一件事的两半
@@ -1449,7 +1662,7 @@ export class App {
     const bodyHeight = layout.rowBottom - layout.rowTop - 1
     const view =
       pending.kind === "permission"
-        ? renderPrompt(pending.request, this.promptScroll, layout.width, bodyHeight)
+        ? renderPrompt(pending.request, this.promptScroll, layout.width, bodyHeight, this.promptHint)
         : renderQuestion(pending.state, this.promptScroll, layout.width, bodyHeight)
     // 居中。靠上一点点 —— 正中间会盖住对话里刚打出来的那几行上下文
     const x = Math.max(0, Math.floor((layout.width - view.width) / 2))
@@ -1524,6 +1737,32 @@ export class App {
     )
   }
 
+  /**
+   * 设置那一屏。**比别的浮层都大** —— 它要一次摊开十几项,而"一次看得全"
+   * 正是它存在的理由;做成一个要上下翻的小窗,就退回了逐条敲命令那种体验。
+   */
+  private drawSettings(layout: Layout): void {
+    const state = this.settings!
+    const top = state.stack[state.stack.length - 1]!
+    const page = this.deps.settings?.page(top.id)
+    if (!page) return
+    const width = Math.max(36, Math.min(layout.width - 4, 80))
+    const bodyHeight = layout.rowBottom - layout.rowTop - 1
+    const height = Math.max(8, Math.min(bodyHeight, 26))
+    const x = Math.max(0, Math.floor((layout.width - width) / 2))
+    const y = Math.max(layout.rowTop + 1, layout.rowTop + 1 + Math.floor((bodyHeight - height) / 3))
+    this.deps.screen.blit({ x, y, width, height }, overlayFrame(width, height, page.title))
+    this.deps.screen.blit(
+      { x: x + 1, y: y + 1, width: width - 2, height: height - 2 },
+      renderSettings(page, {
+        selected: top.selected,
+        width: width - 2,
+        height: height - 2,
+        ...(state.typed !== undefined ? { typed: state.typed } : {}),
+      }),
+    )
+  }
+
   private finishedUpgrade(): boolean {
     const phase = this.upgrade?.phase
     return phase === "done" || phase === "failed" || phase === "cancelled" || phase === "current"
@@ -1586,6 +1825,10 @@ export class App {
       // 计划已经有地方待了:要么画在左下角,要么用户自己把它收了。
       // 后者不能漏 —— 按 ctrl-p 收掉之后它跑到中间栏去,那不叫收起来
       planElsewhere: layout.plan !== undefined || this.hidden.has("plan"),
+      // 牌子在这里就上好色 —— 面板只管把它摆在横线右端,不认识这套配色。
+      // 和状态行上那几个片同一个画法(方括号 = 可以点),所以它们看起来是
+      // 同一类东西,而它们确实是
+      ...(this.deps.copyTargets ? { copyChip: recallChip(t.copyChip) } : {}),
     })
   }
 
@@ -1658,7 +1901,7 @@ export class App {
     //   而它存在的理由正是:全屏界面抓着鼠标,终端原生的拖选被顶掉了 ——
     //   一个用户看不见的复制功能,和没有这个功能是同一种体验。
     //   八列换一个随时看得见、点得到的入口,值。
-    if (this.deps.copyTargets) bits.push({ text: t.copyChip, hit: "copy" })
+    if (this.deps.copyTargets && !this.copyHit) bits.push({ text: t.copyChip, hit: "copy" })
     // ★ 这里**不写上下文占用** —— 它挂在输入框上沿那条线上(见 draw)。同一个数
     //   写两处,用户第一反应永远是「这两个是不是不一样」。
     //   写的是**花费**:那是另一个数(一共发出去过多少,只增不减),而且它没有

@@ -8,15 +8,18 @@
 import { describe, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
 import { Renderer, compact, duration, firstLine, outcomeLine, relativize, shortenPaths, summarize } from "../src/cli/render.ts"
-import { askingJob, confirm, renderRequest, trustNote } from "../src/cli/confirm.ts"
+import { askingJob, confirm, looksLikeIme, optionsLine, renderRequest, trustNote } from "../src/cli/confirm.ts"
 import { Editor } from "../src/cli/editor.ts"
 import { Keyboard } from "../src/cli/keyboard.ts"
 import { LiveRegion } from "../src/cli/live.ts"
 import { Shell } from "../src/cli/shell.ts"
 import { setColorEnabled } from "../src/cli/theme.ts"
 import type { PromptRequest } from "../src/permission/gate.ts"
+import type { Key } from "../src/cli/keys.ts"
+import { stripAnsi } from "../src/cli/width.ts"
 import type { ToolPart } from "../src/session/schema.ts"
 import type { UIEvent } from "../src/agent/events.ts"
+import { flowNote, isLiveCommand } from "../src/cli/main.ts"
 
 setColorEnabled(false) // 断言里比对纯文本
 
@@ -609,5 +612,85 @@ describe("★ --plain 的状态行也要写着「这是哪」", () => {
     const out = makeShell(100)
     expect(out).toContain("test/model")
     expect(out).not.toContain("·  ·")
+  })
+})
+
+/**
+ * ★ 「开关按了,它还照老样子干」。
+ *
+ * system prompt 是每一步重建的,所以 `/agentflow` 翻过来之后下一次请求带的
+ * 已经是新的那一段 —— 按说立刻生效。真机上不是:一场聊久了的会话里,**历史
+ * 比 system 响得多**,模型面前摆着二十轮"我一直是自己动手的"的证据。所以
+ * 切换那一刻还要往历史里落一条消息,把它说成一个有位置、有时间的事件。
+ */
+/**
+ * ★ 中日韩输入法开着的时候,`y` 根本到不了这儿 —— 输入法把字母键吃了。
+ *
+ * 程序无从"处理"那一下(它一个字节都没收到),能做的只有两件:选项行上先写
+ * 一条输入法碰不到的路(`[⏎ y]`),以及候选词上屏之后**说一句话**,而不是
+ * 静悄悄地无视 —— "按了没反应"正是这件事最难自己想明白的地方。
+ */
+describe("输入法把 y 吃掉的时候", () => {
+  const request = {
+    permission: "bash",
+    patterns: ["bash:rm"],
+    alwaysPatterns: ["bash:rm -rf *"],
+    forbidAlways: false,
+    reasons: [],
+    metadata: { command: "rm -rf build" },
+  } as unknown as PromptRequest
+
+  test("★ 选项行上回车和 esc 写在字母前面,而且是写出来的", () => {
+    const line = stripAnsi(optionsLine(request))
+    expect(line).toContain("[⏎ y]")
+    expect(line).toContain("[esc n]")
+    // 靠大写去暗示"回车会选这个"只对已经知道那条约定的人生效
+    expect(line).not.toContain("[Y]")
+  })
+
+  test("★ 作用域截断 —— 挤掉的不能是右边那半句「怎么拒绝」", () => {
+    const long = { ...request, alwaysPatterns: ["bash:" + "x".repeat(200)] } as unknown as PromptRequest
+    expect(stripAnsi(optionsLine(long))).toContain("[esc n]")
+  })
+
+  test("★ 判据是非 ASCII:汉字/假名只可能是上屏来的,打错的 z 只是打错了", () => {
+    const key = (name: string, text?: string) =>
+      ({ name, ctrl: false, meta: false, shift: false, ...(text ? { text } : {}) }) as Key
+    expect(looksLikeIme(key("中"))).toBe(true)
+    expect(looksLikeIme(key("あ"))).toBe(true)
+    expect(looksLikeIme(key("z"))).toBe(false)
+    // 上屏有时候走括号粘贴 —— 那一路认的是 text,不是 name
+    expect(looksLikeIme(key("paste", "你好"))).toBe(true)
+    expect(looksLikeIme(key("paste", "hello"))).toBe(false)
+  })
+})
+
+describe("agentflow 开关立刻生效", () => {
+  test("★ 塞给模型那句话:不是用户说的、现在是什么状态、不用回头重做", () => {
+    const on = flowNote(6)
+    expect(on).toStartWith("Automated message, not from the user.")
+    // 两个数都要写。只写窗口的话,模型会照着 6 去拆活儿 —— 那正是这个模式
+    // 要打破的那个规模
+    expect(on).toContain("6 of them running at once")
+    expect(on).toMatch(/\d+ subagents in flight/)
+    expect(on).toContain("nothing already finished needs redoing")
+
+    const off = flowNote(false)
+    expect(off).toContain("switched agentflow off")
+    expect(off).toContain("nothing needs redoing")
+  })
+
+  /**
+   * ★ 跑到一半敲的斜杠命令默认是排队的(`/clear` 换会话、`/compact` 折历史 ——
+   *   跑到一半动它们就是把脚下的地抽掉)。而只改一个 let 的那几条是例外:
+   *   `/agentflow` 恰恰是用户在**看着它埋头自己干**的时候才想按的那一个。
+   */
+  test("★ 只改设置的当场就办,碰历史 / 碰模型的照旧排队", () => {
+    for (const live of ["/agentflow", "/agentflow on", "/think", "/permission trust", "/view stream", "/setting", "  /language reply ja  "]) {
+      expect(isLiveCommand(live)).toBe(true)
+    }
+    for (const queued of ["/clear", "/compact", "/resume", "/model anthropic/x", "/reset", "/init", "/check", "hello"]) {
+      expect(isLiveCommand(queued)).toBe(false)
+    }
   })
 })

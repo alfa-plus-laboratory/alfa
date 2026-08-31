@@ -462,27 +462,31 @@ describe("buildSystem", () => {
     expect(on.parts[1]).toContain("# Agentflow is on")
     // ★ 两个数都要真的写进去,而且要**分清楚**:100 是能派多少,6 是同时几个在跑。
     //   只写 6 的话模型会照着 6 去拆活儿 —— 那正是这个模式要打破的那个规模
-    expect(on.parts[1]).toContain("**100 subagents in flight**, 6 running at any moment")
+    expect(on.parts[1]).toContain("**100 subagents in flight**, 6 of them running at any moment")
     expect(on.parts[1]).toContain("Plan against 100")
-    // ★ 是**角色**,不是偏好 —— 前两版写成"优先派人",而一句可以权衡的建议
-    //   每一轮都要和"自己干更快"较劲,输一次这一场就回到老样子
-    expect(on.parts[1]).toContain("you are the lead, not the worker")
+    // ★ 硬的那一处是**并行度**,不是身份。这个开关买到的东西就是"一次派一批",
+    //   而那正是模型自己绝不会主动去要的(它默认一次派一个)
+    expect(on.parts[1]).toContain("send them all out **in one turn**")
     // ★ 工具表**没有**少任何东西,而这一段必须自己说清楚这件事。三版强制
     //   (拿掉工具 / 只拿掉 write / 每回合五次额度)都撤了,理由是同一个:
     //   它们的失败形态都是「一个当着用户面说我不能的领班」。所以这段现在
     //   不能再暗示某个工具不在手上 —— 那正是要治的那句话
-    expect(on.parts[1]).toContain("You still have every tool")
+    expect(on.parts[1]).toContain("every tool is still yours")
     expect(on.parts[1]).not.toContain("is not in your tool list")
+    // ★ 第四版(「你是领班,不是干活的」)也撤了:它治好了"自己从头做到尾",
+    //   换来的是把改一行字也外包出去。这一段现在**必须留着自己动手那条路**,
+    //   而且要写出来 —— 只是不说的话,模型读到满屏"派出去"照样会当成禁令
+    expect(on.parts[1]).not.toContain("You do not do the work")
+    expect(on.parts[1]).toContain("## When to just do it")
+    expect(on.parts[1]).toContain("There is no quota either way")
     expect(on.parts[1]).not.toContain("per turn")
-    // 没有硬栏之后,挡着「我先自己做一点」的只剩这两句。丢了就退回前两版
-    expect(on.parts[1]).toContain("starting a service")
-    expect(on.parts[1]).toContain('"I will just do this bit myself first"')
-    // ★ 而且必须当场把 `task` 说明书里那句「两三个调用能干完的别派人」翻掉。
-    //   那句话在关着的时候是对的,开着的时候正好卡在最常见的尺寸上(看一眼命令
-    //   输出、开一个文件),于是真机上它跟用户说「我没有这个工具」然后停住 ——
-    //   一件一行 brief 就解决的事变成了一次拒绝
-    expect(on.parts[1]).toContain("not too small to send out — it is a one-line brief")
-    expect(on.parts[1]).toContain('Never answer the client with "I do not have that tool"')
+    // ★ 第四版另一半也撤了:「一件小到不值得写计划的事也不算小到不值得派出去」
+    //   把地板压到了一次编辑之下,真机上的后果是改一行字派两个子 agent。
+    //   现在这一段反过来点名了那几种"自己干更便宜"的活儿
+    expect(on.parts[1]).not.toContain("not too small to send out")
+    expect(on.parts[1]).toContain("the brief would be longer than the change")
+    // 没有硬栏之后,挡着「一次只派一个」的只剩这一句判据。丢了就退回前两版
+    expect(on.parts[1]).toContain("thinking in a single thread")
     // 模板段不动:开关切一次不该把最长那截可缓存前缀也作废
     expect(on.parts[0]).toBe(off.parts[0]!)
   })

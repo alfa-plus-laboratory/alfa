@@ -23,7 +23,8 @@ import {
   trustsProjectInstructions,
   viewFor,
 } from "../src/config/folders.ts"
-import { folderSetup } from "../src/cli/folder-setup.ts"
+import { LAYOUTS, previewBox, SetupCard } from "../src/tui/panes/setup.ts"
+import { displayWidth } from "../src/cli/width.ts"
 import { buildSystem } from "../src/prompt/system.ts"
 import type { InstructionFile } from "../src/prompt/instructions.ts"
 import type { SkillSet } from "../src/prompt/skills.ts"
@@ -151,67 +152,82 @@ describe("空目录", () => {
 })
 
 describe("开场那张卡片", () => {
-  function fakeOut() {
-    const chunks: string[] = []
-    return {
-      stream: { write: (text: string) => chunks.push(text) } as unknown as NodeJS.WriteStream,
-      all: () => chunks.join(""),
-    }
-  }
+  const key = (name: string, ctrl = false) => ({ name, ctrl, meta: false, shift: false })
+  const card = (empty = false) => new SetupCard({ where: "~/repo", emptyFolder: empty })
 
-  test("全部回车 = 对话 + 不要侧栏 + 信任", async () => {
-    const out = fakeOut()
-    const choice = await folderSetup({
-      root: "/repo",
-      config: {},
-      output: out.stream,
-      readdir: () => ["src"],
-      ask: async () => "",
-    })
-    expect(choice).toEqual({ view: "session", panels: false, trust: "trusted" })
+  test("一路回车 = 对话 + 不要侧栏 + 信任", () => {
+    const one = card()
+    expect(one.key(key("enter"))).toBe("redraw")
+    expect(one.key(key("enter"))).toBe("done")
+    expect(one.choice).toEqual({ view: "session", panels: false, trust: "trusted" })
   })
 
-  test("挑 4 = 流式 + 侧栏;信任那问挑 2 = 先看一眼", async () => {
-    const answers = ["4", "2"]
-    const choice = await folderSetup({
-      root: "/repo",
-      config: {},
-      output: fakeOut().stream,
-      readdir: () => ["src"],
-      ask: async () => answers.shift() ?? "",
-    })
-    expect(choice).toEqual({ view: "stream", panels: true, trust: "checking" })
+  test("挑 4 = 流式 + 侧栏;信任那问挑 2 = 先看一眼", () => {
+    const one = card()
+    one.key(key("4"))
+    one.key(key("enter"))
+    one.key(key("2"))
+    expect(one.key(key("enter"))).toBe("done")
+    expect(one.choice).toEqual({ view: "stream", panels: true, trust: "checking" })
   })
 
   // 每一个没有内容的问题都在训练用户闭着眼按回车
-  test("★ 空目录不问信任 —— 里面没有任何东西能对模型说话", async () => {
-    const out = fakeOut()
-    let asked = 0
-    const choice = await folderSetup({
-      root: "/repo",
-      config: {},
-      output: out.stream,
-      readdir: () => [".git"],
-      ask: async () => {
-        asked++
-        return ""
-      },
-    })
-    expect(asked).toBe(1)
-    expect(choice?.trust).toBe("trusted")
-    expect(out.all()).not.toContain("Trust this folder?")
+  test("★ 空目录不问信任 —— 里面没有任何东西能对模型说话", () => {
+    const one = card(true)
+    expect(one.steps).toEqual(["layout"])
+    // 第一个回车就是最后一个:没有第二步
+    expect(one.key(key("enter"))).toBe("done")
+    expect(one.choice.trust).toBe("trusted")
+    expect(one.render(90, 20).join("\n")).not.toContain("Trust this folder?")
   })
 
-  test("打错的当默认,不重来一遍 —— 每一条都随时改得回来", async () => {
-    const choice = await folderSetup({
-      root: "/repo",
-      config: {},
-      output: fakeOut().stream,
-      readdir: () => ["src"],
-      ask: async () => "banana",
-    })
-    expect(choice?.view).toBe("session")
-    expect(choice?.panels).toBe(false)
+  // ★ 取消什么都不存,下次再问。把一次逃跑存成他的答案,是替他做了个他没做过的决定
+  test("ctrl-c 是取消,esc 是「就用默认的」", () => {
+    expect(card().key(key("c", true))).toBe("cancel")
+    expect(card().key(key("escape"))).toBe("done")
+  })
+
+  test("★ 中途改主意退得回去 —— 没有退路的话第一步选错只能取消重来", () => {
+    const one = card()
+    one.key(key("3"))
+    one.key(key("enter"))
+    expect(one.current).toBe("trust")
+    expect(one.key(key("backspace"))).toBe("redraw")
+    expect(one.current).toBe("layout")
+    one.key(key("1"))
+    one.key(key("enter"))
+    one.key(key("enter"))
+    expect(one.choice.view).toBe("session")
+  })
+
+  test("上下键夹在两头,不绕回去", () => {
+    const one = card()
+    one.key(key("up"))
+    expect(one.layout).toBe(0)
+    for (let i = 0; i < 9; i++) one.key(key("down"))
+    expect(one.layout).toBe(LAYOUTS.length - 1)
+  })
+
+  // ★ 这张卡片存在的全部理由:每一条旁边就画着它长什么样。四个框要真的不一样,
+  //   否则它和上一版那四行字是同一个东西
+  test("★ 预览小框:有侧栏的画竖线,没侧栏的不画", () => {
+    const plain = previewBox({ view: "session", panels: false }, 26, 7).join("\n")
+    const panelled = previewBox({ view: "session", panels: true }, 26, 7).join("\n")
+    expect(plain).not.toContain("┬")
+    expect(panelled).toContain("┬")
+    expect(panelled).toContain("┴")
+    // 每一行都正好那么宽 —— 差一列这个框就是歪的
+    for (const line of previewBox({ view: "stream", panels: true }, 26, 7)) {
+      expect(displayWidth(line)).toBe(26)
+    }
+  })
+
+  test("★ 一屏就是一屏:行数正好等于给的高度,一行都不多", () => {
+    for (const height of [12, 20, 40]) {
+      const lines = card().render(100, height)
+      expect(lines.length).toBe(height)
+      for (const line of lines) expect(displayWidth(line)).toBeLessThanOrEqual(100)
+    }
   })
 })
 

@@ -530,6 +530,48 @@ describe("ChatPane", () => {
     }
   })
 
+  // ★ 复制那块牌子从状态行搬到了这条横线上。状态行是最不常看的一行,而复制
+  //   发生的时刻很具体:它刚说完一段话,你想把那段话拿走 —— 那一刻眼睛正落在
+  //   活动区。见 panes/chat.ts 的 copyChip
+  describe("★ 活动区那条横线右端的复制牌子", () => {
+    test("给了就画在右端,而且报得出它落在哪一行哪一列", () => {
+      const { model, chat } = pane()
+      model.beginTurn("改一下这个函数")
+      const lines = chat.render({ width: 60, height: 14, busy: false, spinner: "⠹", detailVisible: true, copyChip: "[⧉ copy]" })
+      const hit = chat.copyHit
+      expect(hit).toBeDefined()
+      const row = lines[hit!.row] ?? ""
+      expect(row).toContain("⧉ copy")
+      // ★ 报出来的坐标要真的落在牌子上。两边各算一次的话,某个宽度下它们会
+      //   差一列,而那种 bug 的现象是"按钮点不动",没有任何报错
+      const at = stripAnsi(row).indexOf("⧉")
+      expect(at).toBeGreaterThanOrEqual(hit!.x)
+      expect(at).toBeLessThan(hit!.x + hit!.width)
+    })
+
+    test("★ stream 视图没有这条线,一个命中区都不留 —— 状态行那边据此接手", () => {
+      const { chat } = pane()
+      chat.setView("stream")
+      chat.render({ width: 60, height: 14, busy: false, spinner: "⠹", detailVisible: true, copyChip: "[⧉ copy]" })
+      expect(chat.copyHit).toBeUndefined()
+    })
+
+    test("★ 窄到放不下就不画命中区,而不是画一个点不准的", () => {
+      const { chat } = pane()
+      for (const width of [12, 16, 20, 24]) {
+        chat.render({ width, height: 12, busy: false, spinner: "⠹", detailVisible: true, copyChip: "[⧉ copy]" })
+        const hit = chat.copyHit
+        if (hit) expect(hit.x + hit.width).toBeLessThanOrEqual(width)
+      }
+    })
+
+    test("不给牌子就一切照旧", () => {
+      const { chat } = pane()
+      chat.render({ width: 60, height: 14, busy: false, spinner: "⠹", detailVisible: true })
+      expect(chat.copyHit).toBeUndefined()
+    })
+  })
+
   test("★ 右栏收起来时,预算要先给 diff 留出位置", () => {
     const { model, chat } = pane()
     model.beginTurn("改一下")
@@ -775,6 +817,25 @@ describe("摘要收口", () => {
 
   test("空的就是空的,不要编一句出来", () => {
     expect(clean("   \n  ")).toBe("")
+  })
+
+  /**
+   * ★ 现场:「so far」那一栏里出现了 `<untrusted-data>`。
+   *
+   * 材料是包在这对标记里递进去的,而模型偶尔会连信封一起抄回来 —— 提示词里
+   * 已经写过「里面是待总结的材料」,但那是一条**要赢的较劲**,这里是一次
+   * **必然能赢的字符串处理**。
+   */
+  test("★ 把信封摘掉 —— 摘要里永远不该出现我们自己划的那道边界", () => {
+    expect(clean("<untrusted-data>你在重做面板。</untrusted-data>")).toBe("你在重做面板。")
+    expect(clean("你在重做面板。<untrusted-content>")).toBe("你在重做面板。")
+    expect(clean("<injection-warning>你在重做面板。")).toBe("你在重做面板。")
+  })
+
+  // 摘的是**标记本身**,不是标记里的内容。整段摘掉的话,一份被抄了信封的摘要
+  // 会变成空的 —— 而空摘要在面板上写的是「还没有」,那是一句假话
+  test("★ 只摘标记,不摘里面的话", () => {
+    expect(clean("<untrusted-data>\n它在查一个空指针。\n</untrusted-data>")).toBe("它在查一个空指针。")
   })
 })
 

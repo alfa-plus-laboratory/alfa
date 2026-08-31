@@ -181,18 +181,47 @@ export function requestLines(request: PromptRequest): string[] {
   return lines
 }
 
+/** always 那一条后面挂的作用域最多写多宽。整条选项行只有一行,长模式会把它挤爆 */
+const SCOPE_WIDTH = 28
+
 export function optionsLine(request: PromptRequest): string {
-  // 大写的那个 = 回车会选的那个,这是终端交互的通行约定。所以回车改成放行
-  // 之后,大写必须跟着从 N 挪到 Y —— 不挪的话,这一行就在骗人
-  // ★ 方括号里的**键名不译**(Y / a / n / esc)—— 它们是要按下去的东西,
+  // ★ **回车和 esc 写在字母前面**,而且是写出来的,不是靠大写去暗示。
+  //
+  // 这一行原来是 `[Y] allow once … [n] reject  esc`:大写的那个 = 回车会选的
+  // 那个,终端交互的通行约定。问题是**约定只对已经知道它的人生效**,而最需要
+  // 知道"回车能过"的恰恰是那个 `y` 根本按不出来的人 —— 中日韩输入法开着的时候,
+  // 字母键全被输入法吃掉,按下 y 弹出来的是候选词窗口(见 promptKey 那段 ⚠)。
+  // 他在屏幕上找得到的唯一出路必须是**一个输入法碰不到的键**,而且要写成
+  // 那个键本身。
+  //
+  // ★ 方括号里的**键名不译**(⏎ / y / a / n / esc)—— 它们是要按下去的东西,
   //   翻过去用户按不出来。翻的只是后面那几个词。见 i18n 那条「按键名一律不译」
-  const parts = [theme.green(`[Y] ${t.promptAllowOnce}`)]
+  const parts = [theme.green(`[⏎ y] ${t.promptAllowOnce}`)]
   if (!request.forbidAlways) {
+    // 作用域截断:它是一条可能很长的模式,而这一行装不下的时候,被挤掉的
+    // 是右边那个「怎么拒绝」—— 恰好是这一行最不能丢的一半
     const scope = request.alwaysPatterns[0]
-    parts.push(theme.cyan(`[a] ${t.promptAlways}${scope ? ` (${scope})` : ""}`))
+    parts.push(theme.cyan(`[a] ${t.promptAlways}${scope ? ` (${truncate(scope, SCOPE_WIDTH)})` : ""}`))
   }
-  parts.push(theme.dim(`[n] ${t.promptReject}  esc`))
+  parts.push(theme.dim(`[esc n] ${t.promptReject}`))
   return parts.join("  ") + theme.dim("  › ")
+}
+
+/**
+ * 这一下按键是不是「输入法把字送进来了」。
+ *
+ * ⚠ 判据是**非 ASCII**,不是"不认识的键"。一个中日韩字符不可能是从键盘上直接
+ *   敲出来的 —— 它只能是输入法上屏的结果,也就是说这个人刚才按的那几下(多半
+ *   包括一个 `y`)一个都没到这儿。而一个按错的 `k` 只是按错了,跟他说
+ *   「你的输入法开着」是在说一件没发生的事。
+ *
+ * 输入法上屏有时候走括号粘贴(终端把整段一次性送来),所以那一路也算。
+ */
+export function looksLikeIme(key: Key): boolean {
+  const text = key.name === "paste" ? (key.text ?? "") : key.name
+  // eslint 那类工具会想把这个正则改写成 Unicode 属性;别改 —— 这里要的就是
+  // "有没有一个字符超出 ASCII",不是"是不是某个书写系统"
+  return [...text].some((char) => char.codePointAt(0)! > 0x7f)
 }
 
 /**
@@ -210,6 +239,7 @@ function readKey(
 ): Promise<AskDecision> {
   return new Promise((resolve) => {
     let settled = false
+    let hinted = false
     let release: (() => void) | undefined
 
     const finish = (decision: AskDecision, echo: string) => {
@@ -227,19 +257,35 @@ function readKey(
       // 意思相反,是这个程序最不该有的东西
       if (key.name === "enter") return finish("once", theme.green("y"))
       if (key.name === "escape") return finish("reject", theme.dim("n"))
-      // 粘贴、功能键、带修饰符的组合一律无视 —— 别让误触决定文件系统的命运
-      if (key.ctrl || key.meta || [...key.name].length !== 1) return
+      // 粘贴、功能键、带修饰符的组合一律无视 —— 别让误触决定文件系统的命运。
+      // ★ 但输入法上屏那一路要先说一句话再无视,见 hint
+      if (key.ctrl || key.meta || [...key.name].length !== 1) return hint(key)
       switch (key.name.toLowerCase()) {
         case "y":
           return finish("once", theme.green("y"))
         case "a":
-          if (forbidAlways) return // 明确忽略,不给任何"按了有反应"的暗示
+          // 拆句器不确定时那一条根本不画。走**和按错一个键完全相同**的回答 ——
+          // 给它一句专门的解释,等于告诉用户"这个键在别的场合是有用的",
+          // 而那正是这条规矩不该给的念头。见 tui/panes/prompt.ts 里同一处
+          if (forbidAlways) return hint(key)
           return finish("always", theme.cyan("a"))
         case "n":
           return finish("reject", theme.dim("n"))
         default:
-          return
+          return hint(key)
       }
+    }
+
+    /**
+     * 认不出来的那一下:说一句怎么按,然后照旧无视。
+     *
+     * ★ 只说一次。这一行是写进滚动记录的,而输入法上屏经常一次送来好几个字符 ——
+     *   每个字符各刷一行的话,用户看到的是一屏刷屏,而问题本身被顶走了
+     */
+    const hint = (key: Key) => {
+      if (hinted) return
+      hinted = true
+      output.write("\n  " + theme.dim(looksLikeIme(key) ? t.promptImeHint : t.promptKeyHint) + "\n  ")
     }
 
     const onAbort = () => finish("reject", theme.dim("^C"))

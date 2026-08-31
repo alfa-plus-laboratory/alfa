@@ -195,8 +195,20 @@ export function computeLayout(input: LayoutInput): Layout {
   // 自己收的留一条轨(占 RAIL 列 + 一条竖线);窄屏自动折叠的不留 —— 那时候
   // 正是没地方了。挤到对话栏低于下限时也不留:轨是便利,对话是主体
   const railRoom = (n: number) => inner(1 + n) - (wantTree ? TREE.min : 0) - (wantDetail ? DETAIL.min : 0) >= CHAT_MIN
-  let railTree = hidden.has("tree") && !collapsed.includes("tree")
-  let railDetail = hidden.has("detail") && !collapsed.includes("detail")
+  //
+  // ★ 两栏**都**收起来 = 干净布局,一条轨都不留。
+  //
+  //   轨是用来回答「它去哪了、怎么回来」的,而那个问题只在**旁边还有别的栏**
+  //   的时候才需要一个就地的答案。两栏都关掉的人要的是一整片对话,而不是一片
+  //   对话加两条空竖条 —— 那两条一共占六列,恰恰是窄屏上最不该浪费的六列。
+  //   开场卡片上那条「conversation」选的就是这个样子(见 cli/folder-setup.ts)。
+  //
+  //   「怎么回来」在这种情况下由状态行接手:没有轨的那几块会在那儿留下
+  //   `[ctrl-b files]`(见 tui/app.ts 的 statusLine)—— 出路一直在,只是
+  //   换了个不占版面的地方。
+  const bare = hidden.has("tree") && hidden.has("detail")
+  let railTree = !bare && hidden.has("tree") && !collapsed.includes("tree")
+  let railDetail = !bare && hidden.has("detail") && !collapsed.includes("detail")
   if (railTree && railDetail && !railRoom((wantTree ? 1 : 0) + (wantDetail ? 1 : 0) + 2 * (1 + RAIL))) {
     railDetail = false
   }

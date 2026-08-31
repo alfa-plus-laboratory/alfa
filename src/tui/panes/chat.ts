@@ -62,6 +62,19 @@ export interface ChatRenderInput {
    * 只有"本该显示、但左栏窄没了"时才轮到这一栏画它。
    */
   planElsewhere?: boolean
+  /**
+   * 「复制」那块牌子。给了就挂在活动区那条横线的**右端**。
+   *
+   * ── 为什么它从状态行搬到了这儿 ──
+   * 状态行上那一片是**最不常看的一行**:路径、模型、花费、模式、排队 —— 全是
+   * 「背景情况」,人扫一眼就不再回头。而复制这件事发生的时刻很具体:**它刚说完
+   * 一段话,你想把那段话拿走**。那一刻眼睛正落在活动区,而那条横线就在这段话
+   * 的正上方,是屏幕上离「刚说的那段」最近的一处空地。
+   *
+   * ⚠ 只有 session 视图有这条线。stream 视图下这块牌子照旧留在状态行 ——
+   *   见 App.statusLine:那边按「对话栏没接手」来判,两处不会同时出现。
+   */
+  copyChip?: string
 }
 
 /** 排队那几句最多列几行。再多就只写还剩几句 —— 它是提醒,不是重读 */
@@ -100,6 +113,13 @@ export class ChatPane {
    * 因为鼠标事件永远发生在**已经画出来的**那一帧上。
    */
   private live = { top: 0, height: 0, total: 0 }
+  /**
+   * 上一帧那块复制牌子画在哪(相对面板左上角)。
+   *
+   * 和 live 同一条理由:鼠标事件永远发生在**已经画出来的**那一帧上,位置
+   * 要在画的时候记下来。undefined = 这一帧没画(stream 视图,或者窄到放不下)。
+   */
+  private copyAt: { row: number; x: number; width: number } | undefined
 
   constructor(options: { model: ChatModel; transcript: Transcript; view: ViewMode; line(text: string): void }) {
     this.model = options.model
@@ -143,6 +163,11 @@ export class ChatPane {
 
   get toolRows(): number {
     return this.model.board.length
+  }
+
+  /** 复制牌子这一帧画在哪(相对面板左上角)。没画就是 undefined —— 见 copyAt */
+  get copyHit(): { row: number; x: number; width: number } | undefined {
+    return this.copyAt
   }
 
   /** 状态行要提示「你正看着旧内容」。 */
@@ -277,6 +302,9 @@ export class ChatPane {
   // ───────────────────────────────────────────── 画
 
   render(input: ChatRenderInput): string[] {
+    // 每帧从头算。上一帧的位置在这一帧不成立(布局变了、视图切了),而一个
+    // 停在旧坐标上的命中区就是一块「点了会干别的事」的地方
+    this.copyAt = undefined
     const lines = this.mode === "stream" ? this.stream(input) : this.session(input)
     while (lines.length < input.height) lines.push("")
     return lines.slice(0, input.height)
@@ -339,7 +367,12 @@ export class ChatPane {
       // 截掉的是**结尾**,而摘要的结尾是「现在卡在哪」—— 最该看见的那句。
       // 所以不但要打省略号,还要在横线上写清还剩几行、去哪看全文
       out.push(
-        sectionRule(t.summaryTitle, width, theme.dim, hidden > 0 ? t.summaryClipped(hidden) : this.summaryNote()),
+        sectionRule(
+          t.summaryTitle,
+          width,
+          theme.dim,
+          theme.dim(hidden > 0 ? t.summaryClipped(hidden) : this.summaryNote()),
+        ),
       )
       if (hidden > 0 && shown.length > 0) {
         shown[shown.length - 1] = truncateToWidth(shown[shown.length - 1]!, Math.max(1, inner - 1)) + "…"
@@ -360,7 +393,7 @@ export class ChatPane {
     if (zone.plan > 0) {
       const progress = planProgress(this.model.plan)
       const note = planned.hidden > 0 ? t.planClipped(progress.done, progress.total, planned.hidden) : t.planProgress(progress.done, progress.total)
-      out.push(sectionRule(t.planTitle, width, theme.yellow, note))
+      out.push(sectionRule(t.planTitle, width, theme.yellow, theme.dim(note)))
       for (const line of planRows(planned.shown, inner).slice(0, zone.plan - 1)) out.push(line)
     }
 
@@ -369,7 +402,15 @@ export class ChatPane {
     // 别的两段用词(`so far` / `user`),这一段用他。那两段讲的是**内容是谁的**,
     // 而这一段讲的是**现在怎么样了** —— 一个会动的东西比「现在」两个字说得清楚
     // 得多:他在扫描就是在想,在抡胳膊就是在动手,歇着就是没在跑。
-    if (zone.liveRule > 0) out.push(sectionRule(this.face(input), width, this.facePaint(input)))
+    if (zone.liveRule > 0) {
+      const chip = input.copyChip ?? ""
+      const rule = sectionRule(this.face(input), width, this.facePaint(input), chip)
+      // 牌子落在哪一列:头 + 填充横线之后。宽度不够时 sectionRule 会把它截掉,
+      // 那种时候一格命中区都不留 —— 一个点了没反应的按钮比没有按钮糟得多
+      const at = chipColumn(this.face(input), width, chip)
+      if (at) this.copyAt = { row: out.length, x: at.x, width: at.width }
+      out.push(rule)
+    }
 
     const speech = this.model.speech.view(inner, Math.max(0, zone.speech - head.length), this.scroll)
     /** 滚动条只画在这几行上 —— session 视图里能滚的**只有**它说的那段话 */
@@ -586,11 +627,40 @@ export class ChatPane {
  */
 function sectionRule(label: string, width: number, paint: (text: string) => string, note = ""): string {
   const head = ` ${label} `
-  const tail = note.length > 0 ? ` ${note} ` : ""
-  const room = Math.max(0, width - 1 - displayWidth(head) - displayWidth(tail))
+  // ⚠ 空不空按 displayWidth 判,不按 length。调用方给的是**上过色**的字符串,
+  //   而 theme.dim("") 是 `ESC[2m ESC[22m` —— 八个字符、零列宽。按 length 判的话
+  //   一个没有内容的 note 会在右端凭空撑出两个空格
+  const tail = displayWidth(note) > 0 ? ` ${note} ` : ""
+  const room = ruleRoom(head, width, tail)
   // 标题自己就可能比整栏还宽(活动区那条线的标题是个七列的机器人),截住 ——
   // 超一列就会盖到隔壁面板上,而且屏幕的差分从此再也对不回来
-  return truncateToWidth(paint(head) + theme.dim("─".repeat(room) + tail), width)
+  //
+  // ⚠ 右端那段**不再包在 dim 里**。调用方给的 note 可能是**已经上过色**的
+  //   (活动区那条线右端挂着复制牌子),再套一层 dim 的话,牌子里那个关闭码
+  //   会把外面这层 dim 提前关掉 —— 现象是横线在牌子之后突然变亮。灰是灰的
+  //   那几条自己在调用处 dim,颜色的归属这样才说得清。
+  return truncateToWidth(paint(head) + theme.dim("─".repeat(room)) + tail, width)
+}
+
+/** 一条分节线上留给中间那段横线的列数。和 chipColumn 共用,免得两处各算一遍 */
+function ruleRoom(head: string, width: number, tail: string): number {
+  return Math.max(0, width - 1 - displayWidth(head) - displayWidth(tail))
+}
+
+/**
+ * 挂在分节线右端那块牌子落在第几列、占多宽(相对面板左边)。
+ *
+ * ★ 装不下就返回 undefined,而调用方据此**一格命中区都不留**。装不下时
+ *   sectionRule 会把牌子截掉(或者截掉一半),而一个点了没反应、或者点了
+ *   位置不对的按钮,比根本没有按钮糟得多。
+ */
+function chipColumn(label: string, width: number, chip: string): { x: number; width: number } | undefined {
+  if (displayWidth(chip) === 0) return undefined
+  const head = ` ${label} `
+  const tail = ` ${chip} `
+  // room 被夹到 0 就说明这一行已经放不下了 —— 那时候总宽会超出 width
+  if (width - 1 - displayWidth(head) - displayWidth(tail) < 0) return undefined
+  return { x: displayWidth(head) + ruleRoom(head, width, tail), width: displayWidth(tail) }
 }
 
 /**

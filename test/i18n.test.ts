@@ -194,9 +194,8 @@ describe("★ 界面文案一句都不许绕过 i18n", () => {
     expect(stripAnsi(chinese)).toContain(zh.promptAllowOnce)
     // ★ 键名不译:要按下去的东西翻过去就按不出来了
     for (const line of [english, chinese]) {
-      expect(stripAnsi(line)).toContain("[Y]")
-      expect(stripAnsi(line)).toContain("[n]")
-      expect(stripAnsi(line)).toContain("esc")
+      expect(stripAnsi(line)).toContain("[⏎ y]")
+      expect(stripAnsi(line)).toContain("[esc n]")
     }
   })
 

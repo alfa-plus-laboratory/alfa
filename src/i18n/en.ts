@@ -298,8 +298,8 @@ export const en = {
   //   总共可以排到 100
   agentflowOn: (running: number, total: number) => `agentflow: on — up to ${total} subagents, ${running} working at once`,
   agentflowOff: "agentflow: off",
-  agentflowHint: "it splits the work up by default: many subagents, chained, most of the job handed out rather than done here",
-  agentflowOffHint: "back to doing the work here, with the occasional subagent (4 at a time)",
+  agentflowHint: "it fans work out by default: many subagents at once, chained — it still edits and runs things itself",
+  agentflowOffHint: "back to one thing at a time, with the occasional subagent (4 at a time)",
   agentflowRemembered: "remembered — /agentflow switches it",
   agentflowUsage: (min: number, max: number) => `/agentflow, or /agentflow on | off | ${min}-${max}`,
   agentflowBadWidth: (value: string, min: number, max: number) =>
@@ -404,6 +404,7 @@ export const en = {
   cmdThink: "turn extended thinking on or off (remembered)",
   cmdAgentflow: "let it run many subagents at once, in a pipeline (remembered)",
   cmdResume: "pick an earlier session and keep going",
+  cmdSetting: "every setting on one screen — view, panels, trust, permissions, model, keys",
   cmdView: "switch between the summary view and the scrolling transcript",
   cmdLanguage: "set the interface language, or the language the model replies in",
   cmdSummary: "show the session summary in full",
@@ -522,6 +523,15 @@ export const en = {
   promptAllowOnce: "allow once",
   promptAlways: "always",
   promptReject: "reject",
+  /**
+   * ★ 认不出来的那一下之后,框里说的那句话。**出路写在前面,原因写在后面。**
+   *
+   * 框最窄能到 30 列,而截断永远从尾巴开始 —— 所以尾巴上必须是那半句"没了也
+   * 不影响他把事情办完"的话。原来写反了:80 列上就被截成
+   * 「…before they get here…」,而被吃掉的恰好是「⏎ allows」。
+   */
+  promptImeHint: "⏎ allows, esc rejects — your input method is taking the letter keys",
+  promptKeyHint: "⏎ allows, esc rejects — that key does nothing here",
   promptParseUnsure: "could not parse this command reliably — review the full text above",
   promptNoKeyboard: "cannot read a key",
   /** --plain 状态行。全屏那边走 keysHint,同一句话两处写法一度不一样 */
@@ -544,6 +554,67 @@ export const en = {
   copySent: (what: string, size: string) => `sent ${what} (${size}) to the terminal's clipboard`,
   copyClipped: (size: string) => `only the first ${size} fit — terminals drop an oversized clipboard write whole`,
 
+  // ─────────────────────────────────────────── /setting(见 cli/settings.ts)
+  settingNoScreen: "the settings screen needs the full-screen interface — here, use /view /permission /trust /think /agentflow /model /language /check",
+  settingsTitle: "settings",
+  /** 分节名说的是**存在哪**:这一节按文件夹存,下面几节是全局的 */
+  settingsFolderSection: "this folder",
+  settingsAgentSection: "the agent",
+  settingsModelSection: "model",
+  settingsLanguageSection: "language",
+  settingsOn: "on",
+  settingsOff: "off",
+  settingsView: "view",
+  settingsViewSession: "conversation",
+  settingsViewStream: "stream",
+  settingsPanels: "side panels",
+  settingsPanelsHint: "file tree on the left, preview on the right — ctrl-b and ctrl-] toggle them too",
+  settingsTrust: "trust",
+  settingsTrustHint: "whether this folder's AGENTS.md, .alfa/memory and .alfa/skills reach the model",
+  settingsTrustedAt: (day: string) => `trusted on ${day}`,
+  settingsTrustYes: "trusted",
+  settingsTrustNo: "untrusted",
+  settingsTrustCheck: "look it over",
+  settingsPermission: "permission",
+  settingsThinking: "extended thinking",
+  settingsAgentflow: "agentflow",
+  settingsAutoCompact: "auto-compact",
+  settingsAutoCompactHint: "fold the session into a handoff summary when the context window fills",
+  settingsCheck: "check before handing back",
+  settingsCheckNone: "no type-check or build was detected in this project",
+  settingsCheckCommand: (command: string) => `runs: ${command}`,
+  settingsModel: "model",
+  settingsModelHint: "switching keeps the whole conversation — only thinking blocks are dropped",
+  settingsModelTitle: "model",
+  settingsModelCurrent: "this is the one in use",
+  settingsModelSwitch: "⏎ switch to this one",
+  settingsKeysRow: "API keys",
+  settingsKeysHint: "stored 0600 in your home directory, never in the project",
+  settingsKeysCount: (n: number) => (n === 1 ? "1 provider" : `${n} providers`),
+  settingsKeysTitle: "API keys",
+  settingsKeysEmpty: "no providers configured — add one with: alfa auth login",
+  settingsKeyMissing: "no key",
+  settingsKeySourceEnv: "from the environment",
+  settingsKeySourceFile: "stored",
+  settingsKeyHint: "⏎ open to replace or remove this key",
+  settingsKeyFromEnv: (id: string) => `an environment variable is set for ${id} — it wins over anything stored here`,
+  settingsKeyPaste: "paste a new key",
+  settingsKeyPasteHint: "⏎ then paste. It is never echoed and never shown again.",
+  settingsKeySaved: (id: string) => `saved the key for ${id}`,
+  settingsKeyEmpty: "nothing was pasted",
+  settingsKeyWhitespace: "the key contains whitespace — check for a stray copy/paste artifact",
+  settingsKeyRemove: "remove the stored key",
+  settingsKeyRemoveHint: "deletes it from auth.json. Environment variables are not touched.",
+  settingsKeyRemoved: (id: string) => `removed the stored key for ${id}`,
+  settingsLanguageInterface: "interface",
+  settingsLanguageReply: "replies",
+  settingsLanguageAuto: "auto",
+  settingsChanged: (what: string, value: string) => `${what}: ${value}`,
+  settingsKeys: "↑↓ pick · ←→ change · ⏎ open · esc back",
+  settingsPickKeys: "↑↓ pick · ⏎ choose · esc back",
+  settingsSecretKeys: "paste it, then ⏎ · esc cancel",
+  settingsSecretHint: "the key is not echoed — paste and press enter",
+
   // ─────────────────────────────────────────── 第一次进一个文件夹
   /** 见 cli/folder-setup.ts。措辞的重点:这是**这台机器**的偏好,不是仓库的属性 */
   folderSetupTitle: (path: string) => `First time here — ${path}`,
@@ -562,11 +633,14 @@ export const en = {
     "you just cloned.",
   ],
   folderSetupTrustYes: "yes, get going",
+  /** 默认那条也要有说明。只有另一条有的话,读起来像"默认那条没什么可说的" */
+  folderSetupTrustYesHint: "its AGENTS.md and .alfa/ take effect from the first message",
   folderSetupTrustCheck: "look it over first",
   folderSetupTrustCheckHint: "read those files, then trust it if nothing looks off",
-  folderSetupChoose: "Choose",
-  folderSetupDefault: "default",
-  folderSetupSaved: "Change it any time: /view, ctrl-b, ctrl-], /trust.",
+  /** 标题右端那个「第几步」。用户按第一个回车之前就该知道总共几步 */
+  setupStep: (at: number, total: number) => `step ${at} of ${total}`,
+  setupKeys: "↑↓ pick · ⏎ next · ⌫ back · esc take the defaults",
+  folderSetupSaved: "Change it any time: /setting, /view, ctrl-b, ctrl-], /trust.",
 
   // ─────────────────────────────────────────── 帮助
   helpTui: [
@@ -578,7 +652,7 @@ export const en = {
     "  ctrl-y         copy something   ctrl-l     repaint the screen",
     "  ctrl-o         lock detail      ctrl-r     refresh tree and index",
     "  ctrl-c         clear / exit     pgup/pgdn  scroll the live area",
-    "  /context /compact /check /view /language /permission /trust",
+    "  /setting /context /compact /check /view /language /permission /trust",
     "  /think /agentflow /model /resume /summary /clear /upgrade",
     "  /history-clean /reset /help /exit",
   ].join("\n"),
@@ -587,7 +661,7 @@ export const en = {
     "  ctrl-j         newline          esc      interrupt",
     "  ctrl-c         clear / exit     ctrl-d   exit",
     "  up/down        history",
-    "  /context /compact /check /view /language /permission /trust",
+    "  /setting /context /compact /check /view /language /permission /trust",
     "  /think /agentflow /model /resume /summary /clear /upgrade",
     "  /history-clean /reset /help /exit",
   ].join("\n"),

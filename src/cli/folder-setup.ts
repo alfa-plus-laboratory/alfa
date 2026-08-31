@@ -1,5 +1,8 @@
 /**
- * 第一次在一个文件夹里跑 alfa 时问的那两句。
+ * 第一次在一个文件夹里跑 alfa 时那张卡片的**驱动**。
+ *
+ * 卡片本身(问什么、怎么画、按键怎么走)在 tui/panes/setup.ts —— 那边是纯的。
+ * 这里只干三件事:进全屏、把按键喂给它、把答案交回去。
  *
  * ── 为什么值得打断他一次 ──
  * 这两件事都属于「不问就只能替他猜,而猜错了他多半不知道能改」:
@@ -10,44 +13,31 @@
  *      prompt,它的 `.alfa/mcp.json` 能指定要跑的进程 —— 而 clone 谁的仓库
  *      是一件太随手的事。
  *
- * ── ★ 两句,不是四句 ──
- * 「中间栏画什么」和「侧栏开不开」是同一个问题的两半:用户心里想的是"这个
- * 仓库我要什么样的界面",不是两个独立开关。拆成两问的代价是每进一个新仓库
- * 多按一次回车,而多按的那一次会让这张卡片从"帮我配一下"变成"又来了"。
+ * ── ★ 位置变了:现在在 keyboard.open() **之后** ──
+ * 上一版走 readLine,那条路要求 keyboard 还没接管 stdin,所以它必须排在前面。
+ * 全屏卡片正好反过来 —— 它要的就是 raw 模式下的按键。合成器和主界面**共用
+ * 同一个 Screen 实例**(由调用方创建后传进来):各自 new 一个的话,卡片退出
+ * 时会离开备用屏、主界面再进一次,中间闪一下用户刚看完的横幅。
  *
  * ── 空目录不问信任 ──
  * 里面一个文件都没有的地方,没有任何东西能对模型说话。为一个空目录问一句
  * "要信任它吗",问的是一个没有内容的问题 —— 而每一个没有内容的问题都在
  * 训练用户闭着眼按回车。
- *
- * ── 为什么在进全屏之前问 ──
- * 答案决定的正是全屏界面长什么样。进去之后再问就得先画一遍旧样子、再当着
- * 用户的面重排一次。而且这里能直接用 readLine —— 那条路要求 keyboard 还
- * 没接管 stdin(见 cli/main.ts 里调用它的位置)。
  */
-import { type Config, type ViewMode } from "../config/config.ts"
+import type { Keyboard } from "./keyboard.ts"
+import type { Screen } from "../tui/screen.ts"
+import { type Config } from "../config/config.ts"
 import { isEmptyFolder, type FolderChoice } from "../config/folders.ts"
 import { homePath } from "../fs/workspace.ts"
-import { t } from "../i18n/index.ts"
-import { InputCancelled, readLine } from "./secret-input.ts"
-import { theme } from "./theme.ts"
-
-/** 四种排布。顺序就是列出来的顺序,第一条是默认 */
-const LAYOUTS: Array<{ key: string; view: ViewMode; panels: boolean }> = [
-  { key: "1", view: "session", panels: false },
-  { key: "2", view: "session", panels: true },
-  { key: "3", view: "stream", panels: false },
-  { key: "4", view: "stream", panels: true },
-]
+import { SetupCard } from "../tui/panes/setup.ts"
 
 export interface FolderSetupDeps {
   root: string
   config: Config
-  output?: NodeJS.WriteStream
+  screen: Screen
+  keyboard: Keyboard
   /** 注入用。测试里给一个假的目录列表 */
   readdir?: (dir: string) => string[]
-  /** 注入用。测试里按顺序喂答案 */
-  ask?: (prompt: string) => Promise<string>
 }
 
 /**
@@ -57,63 +47,37 @@ export interface FolderSetupDeps {
  * 存一份"他没回答的答案"下来,等于用一次逃跑替他做了决定。
  */
 export async function folderSetup(deps: FolderSetupDeps): Promise<FolderChoice | undefined> {
-  const out = deps.output ?? process.stdout
-  const ask = deps.ask ?? ((prompt: string) => readLine(prompt))
+  const card = new SetupCard({
+    where: homePath(deps.root),
+    emptyFolder: isEmptyFolder(deps.root, deps.readdir),
+  })
+  const { screen, keyboard } = deps
 
-  out.write("\n" + theme.bold(`  ${t.folderSetupTitle(homePath(deps.root))}`) + "\n")
-  out.write(theme.dim(`  ${t.folderSetupWhere}`) + "\n\n")
-
-  try {
-    out.write(theme.bold(`  ${t.folderSetupLayout}`) + "\n")
-    for (const [index, option] of LAYOUTS.entries()) {
-      const label = t.folderSetupLayoutOptions[index]!
-      out.write(
-        theme.bold(`    ${option.key}  `) +
-          label.name.padEnd(28) +
-          theme.dim(label.hint) +
-          (index === 0 ? theme.dim(`  (${t.folderSetupDefault})`) : "") +
-          "\n",
-      )
-    }
-    const picked = (await ask(theme.bold(`  ${t.folderSetupChoose}`) + theme.dim(" [1]: "))).trim()
-    // 打错的当默认。这张卡片不该有"你选错了,再来一次" —— 每一条都随时改得回来
-    const layout = LAYOUTS.find((one) => one.key === picked) ?? LAYOUTS[0]!
-
-    const trust = await askTrust(deps, out, ask)
-    if (trust === undefined) return undefined
-
-    out.write(theme.dim(`\n  ${t.folderSetupSaved}`) + "\n\n")
-    return { view: layout.view, panels: layout.panels, trust }
-  } catch (error) {
-    if (error instanceof InputCancelled) return undefined
-    throw error
+  screen.enter()
+  const paint = () => {
+    screen.resize()
+    screen.begin()
+    screen.blit({ x: 0, y: 0, width: screen.width, height: screen.height }, card.render(screen.width, screen.height))
+    screen.end()
   }
-}
+  paint()
 
-/**
- * 信任那一问。
- *
- * 空目录直接给 trusted 且**一个字都不写** —— 见文件头。
- */
-async function askTrust(
-  deps: FolderSetupDeps,
-  out: NodeJS.WriteStream,
-  ask: (prompt: string) => Promise<string>,
-): Promise<FolderChoice["trust"] | undefined> {
-  if (isEmptyFolder(deps.root, deps.readdir)) return "trusted"
-
-  out.write("\n" + theme.bold(`  ${t.folderSetupTrust}`) + "\n")
-  for (const line of t.folderSetupTrustWhy) out.write(theme.dim(`  ${line}`) + "\n")
-  out.write(
-    theme.bold("    1  ") +
-      t.folderSetupTrustYes.padEnd(28) +
-      theme.dim(`(${t.folderSetupDefault})`) +
-      "\n" +
-      theme.bold("    2  ") +
-      t.folderSetupTrustCheck.padEnd(28) +
-      theme.dim(t.folderSetupTrustCheckHint) +
-      "\n",
-  )
-  const answer = (await ask(theme.bold(`  ${t.folderSetupChoose}`) + theme.dim(" [1]: "))).trim()
-  return answer === "2" ? "checking" : "trusted"
+  return await new Promise<FolderChoice | undefined>((resolve) => {
+    let settled = false
+    let release: (() => void) | undefined
+    const finish = (choice: FolderChoice | undefined) => {
+      if (settled) return
+      settled = true
+      release?.()
+      resolve(choice)
+    }
+    release = keyboard.push((key) => {
+      // 改大小也走这条路:全屏卡片上的预览小框宽度是算出来的,不重画就错位
+      if (key.name === "mouse") return
+      const action = card.key(key)
+      if (action === "done") return finish(card.choice)
+      if (action === "cancel") return finish(undefined)
+      paint()
+    })
+  })
 }

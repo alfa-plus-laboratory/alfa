@@ -34,7 +34,7 @@ import {
 } from "../agent/summarize.ts"
 import { streamWithRetry } from "../llm/retry.ts"
 import { stream } from "../llm/stream.ts"
-import { buildRegistry, defaultModelSpec } from "../llm/setup.ts"
+import { buildRegistry, defaultModelSpec, resolveProviders } from "../llm/setup.ts"
 import { resolveShell } from "../env/shell.ts"
 import { setModelChoices } from "./commands.ts"
 import { manualSetupHint, onboard } from "./onboard.ts"
@@ -49,6 +49,7 @@ import {
   FLOW_WINDOW_MAX,
   FLOW_WINDOW_MIN,
   isFlowWindow,
+  MAX_AGENT_JOBS,
   MAX_FLOW_ALIVE_JOBS,
 } from "../agent/flow.ts"
 import {
@@ -75,7 +76,7 @@ import {
   setInterfaceLanguage,
   t,
 } from "../i18n/index.ts"
-import { loadAuth } from "../config/auth.ts"
+import { loadAuth, maskKey, removeCredential, setCredential } from "../config/auth.ts"
 import { authCommand, authUsage } from "./auth.ts"
 import { parseModelRef } from "../llm/registry.ts"
 import { NoCredentialsError, UnknownModelError, type LLMRequest, type ModelInfo, type ModelRef } from "../llm/types.ts"
@@ -94,6 +95,7 @@ import {
   folderConfig,
 } from "../config/folders.ts"
 import { folderSetup } from "./folder-setup.ts"
+import { createSettings, type ProviderRow } from "./settings.ts"
 import { copyTargets } from "../tui/panes/copy.ts"
 import { settleTrustReview, TRUST_AGENT_NAME, trustReviewPrompt, trustSummary } from "./trust.ts"
 import { discoverMemories, renderMemories } from "../prompt/memory.ts"
@@ -1164,6 +1166,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
    *   没有"用户说了什么"可言,所以活动区那格问题不能被它清掉
    */
   const runTurn = async (text?: string): Promise<TurnOutcome> => {
+    // 攒着的那条「设置刚被改过」先落地。★ 排在用户这句话**前面** —— 读下来
+    // 就是「开关翻了,然后他说了这个」,顺序反过来会读成对他这句话的追加要求
+    if (pendingNote !== undefined) {
+      injectSynthetic(pendingNote)
+      pendingNote = undefined
+    }
     if (text !== undefined) {
       lastUserText = text
       // 新起一轮:活动区清空、浓缩重新开始攒。放在这里而不是界面层,
@@ -1213,6 +1221,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
    * 接会话时那句"你说的话"都不会把它当成用户的原话 —— 一份子 agent 的报告
    * 当然不是用户说的。
    */
+  /**
+   * 还没塞进去的那条「设置刚被改过」。见 noteToModel。
+   *
+   * ⚠ 空闲时**不能**立刻塞:那会让 hasUnanswered() 变成 true,而 pump 据此
+   *   会凭空开一轮 —— 用户按了个开关,换来一次没人要过的模型调用和一笔账。
+   */
+  let pendingNote: string | undefined
+
   const injectSynthetic = (text: string): void => {
     const now = Date.now()
     const id = newMessageID()
@@ -1471,10 +1487,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     agents: agentJobs,
     submitWhileBusy: (text) => {
       // 斜杠命令是对**这一场会话**动手的(换会话、折历史、换模型),而不是
-      // 说给模型听的话。跑到一半执行它们就是把脚下的地抽掉 —— 照旧排队
+      // 说给模型听的话。跑到一半执行它们就是把脚下的地抽掉 —— 照旧排队。
+      // 设置类那几条例外,由宿主当场执行(见 isLiveCommand)
       if (text.trim().startsWith("/")) return false
       injectUser(text)
       return true
+    },
+    noteToModel: (text) => {
+      // 跑着的时候当场塞:主循环**每一步**都从库里重读全量历史(见 agent/loop.ts),
+      // 所以它在下一步就看得见 —— 而这正是"我按了开关,它却还照老样子干"的那几十秒
+      if (turnSignal !== undefined) injectSynthetic(text)
+      // 空着就先攒着,下一轮开跑时落地。立刻塞的话 hasUnanswered() 会变成 true,
+      // 而 pump 据此会凭空开一轮 —— 一次没人要过的模型调用
+      else pendingNote = text
     },
     hasUnanswered,
     drainAgents,
@@ -1544,6 +1569,32 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         remeasure()
         if (!envNameInUse("MODEL")) setDefaultModel(next)
         return undefined
+      },
+      providers: () =>
+        resolveProviders({ config, auth: loadAuth() }).map((one) => ({
+          id: one.id,
+          type: one.type,
+          source: one.source,
+          // ★ 掩码,永远不是完整密钥。没有 --show-key 这种开关,这一屏也不例外
+          ...(one.apiKey ? { masked: maskKey(one.apiKey) } : {}),
+        })),
+      setKey: (id, apiKey) => {
+        try {
+          setCredential(id, { apiKey })
+        } catch (error) {
+          return describe(error)
+        }
+        // ★ 注册表**必须重建**。它是启动时按当时那份 auth.json 装出来的,
+        //   每一家的 key 都烤在里面了 —— 不重建的话,存下来的新 key 要等下次
+        //   启动才生效,而屏幕上刚说过"已保存"
+        registry = buildRegistry({ config, auth: loadAuth() })
+        setModelChoices(registry.catalog())
+        return undefined
+      },
+      clearKey: (id) => {
+        removeCredential(id)
+        registry = buildRegistry({ config, auth: loadAuth() })
+        setModelChoices(registry.catalog())
       },
     },
     check: {
@@ -1637,37 +1688,41 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     //   没有终端也没有管道 = 没有人会再送进来任何东西,直接走。
     if (terminalGone()) return 0
 
-    /**
-     * ★ 第一次在这个文件夹里跑,先问两句(见 cli/folder-setup.ts)。
-     *
-     * 位置很讲究:
-     *   · 在 `keyboard.open()` **之前** —— 那张卡片走的是 readLine,它自己要
-     *     接管一次 stdin,而 keyboard 一旦接管就是两个人抢同一个流。
-     *   · 在进全屏**之前** —— 问的正是全屏界面长什么样,进去之后再问就得先画
-     *     一遍旧样子、再当着用户的面重排一次。
-     *
-     * 只在全屏这条路上问,而且要 keyboard 用得上:--plain 里没有"侧栏"这回事,
-     * -p 和管道里没有人可以问,而问一个没人会答的问题就是挂在那儿不动了。
-     */
-    if (fullscreen && keyboard.usable && isFirstVisit(root, config)) {
-      const choice = await folderSetup({ root, config })
-      // 按了 Ctrl-C 就什么都不存,下次再问 —— 见 folderSetup 的返回值说明
-      if (choice) {
-        rememberFolder(root, choice)
-        deps.view = choice.view
-        panels = choice.panels
-        trust = choice.trust
-      }
-    }
-
     // open() 才是真判断:isTTY 为真但 raw 模式拿不到时(某些 CI 的伪终端),
     // 画出来的界面永远收不到按键 —— 那种情况必须退回逐行读
     if (!keyboard.usable || !keyboard.open()) return await piped(deps)
     if (transcript && chatModel) {
+      /**
+       * ★ 合成器在这里建,不在 fullscreen_ 里 —— 开场那张卡片要用**同一个**。
+       *
+       * 各自 new 一个的话,卡片画完退出时会离开备用屏、主界面紧接着再进一次,
+       * 用户看到的是中间闪一下刚才那张横幅。同一个实例进一次就够了。
+       */
+      const screen = new Screen()
+      /**
+       * ★ 第一次在这个文件夹里跑,先问两句(见 cli/folder-setup.ts)。
+       *
+       * 位置:在 `keyboard.open()` **之后**、进主界面之前。上一版是反过来的
+       * (卡片走 readLine,那条路要求 keyboard 还没接管 stdin);现在它是一张
+       * 全屏卡片,要的就是 raw 模式下的按键。
+       *
+       * 只在全屏这条路上问:--plain 里没有"侧栏"这回事,-p 和管道里没有人
+       * 可以问,而问一个没人会答的问题就是挂在那儿不动了。
+       */
+      if (isFirstVisit(root, config)) {
+        const choice = await folderSetup({ root, config, screen, keyboard })
+        // 按了 Ctrl-C 就什么都不存,下次再问 —— 见 folderSetup 的返回值说明
+        if (choice) {
+          rememberFolder(root, choice)
+          deps.view = choice.view
+          panels = choice.panels
+          trust = choice.trust
+        }
+      }
       // 抓鼠标默认开。它和终端原生的拖选是互斥的,但**多数终端按住 Shift
       // 就能绕过去**做原生选择 —— 有那条现成的路,就不值得为了复制而默认
       // 关掉点击。终端不吃 Shift 那一套就用 `--no-mouse`。
-      return await fullscreen_(deps, keyboard, transcript, chatModel, {
+      return await fullscreen_(deps, keyboard, transcript, chatModel, screen, {
         mouse: flags["no-mouse"] !== true,
         panels,
       })
@@ -1923,6 +1978,21 @@ interface InteractiveDeps {
    * 返回 false = 这一句不能这么递(斜杠命令),按老规矩排队。
    */
   submitWhileBusy(text: string): boolean
+  /**
+   * 往当前会话塞一条**模型看得见、界面不显示**的话。
+   *
+   * ── 为什么改一个开关还要往历史里塞话 ──
+   * system prompt 是每一步重建的,所以 `/agentflow` 翻过来之后,下一次请求带的
+   * 已经是新的那一段了 —— 按说"立刻生效"。真机上不是:一场聊了二十轮的会话里,
+   * **历史比 system 响得多**。模型面前摆着二十轮"我一直是自己动手的"的证据,
+   * 而变化只发生在一段它从第一次请求起就见过、这次悄悄换了几段的长文里。
+   * 用户看到的就是「开关按了,它还照老样子干」。
+   *
+   * 一条落在**切换那一刻**的消息把这件事说成了一个事件:它有位置、有时间、
+   * 紧挨着接下来那几步。合成标志保证它不进滚动记录、不进摘要 —— 那不是用户
+   * 说的话(见 session/schema.ts 的 TextPart.synthetic)。
+   */
+  noteToModel(text: string): void
   /** 历史里有没有一条没人答的话(子 agent 的报告就是这么进来的) */
   hasUnanswered(): boolean
   /** 等所有子 agent 回来并把报告消化掉。没有界面可以叫醒谁的那两条路要它 */
@@ -1982,6 +2052,12 @@ interface InteractiveDeps {
      * 里面写着为什么(不认识这个 provider / 这家没有 key)。
      */
     switch(spec: string): string | undefined
+    /** 配过的 provider 清单(密钥只给掩码)。`/setting` 那一屏用 */
+    providers(): ProviderRow[]
+    /** 存一个新密钥并重建注册表。返回一句话 = 没存成 */
+    setKey(id: string, apiKey: string): string | undefined
+    /** 删掉存着的那个。环境变量不动 —— 那不是我们写的 */
+    clearKey(id: string): void
   }
   /** 收口前的自动检查(见 agent/check.ts)。`/check` 读写它 */
   check: {
@@ -2034,6 +2110,11 @@ interface InteractiveDeps {
    * 管道里没有界面可开。默认实现说清"这里问不了",而不是静悄悄什么都不做。
    */
   openResume(): void
+  /**
+   * 打开设置那一屏。**只有全屏那套装得出来** —— --plain 和管道下是
+   * undefined,那两条路照旧一条条敲命令(见 settingCommand)。
+   */
+  openSettings?(page?: string): void
   /**
    * 升级用的独占浮层。**只有全屏那套装得出来** —— --plain 和管道下是
    * undefined,那两条路照旧一行一行地写(见 upgradeCommand)。
@@ -2199,6 +2280,31 @@ function shortPath(path: string, root: string): string {
 type SlashOutcome = boolean | string
 
 /**
+ * 一轮跑着的时候也能**当场执行**的斜杠命令。
+ *
+ * ── 为什么要有这张表 ──
+ * 别的斜杠命令跑到一半执行就是把脚下的地抽掉:`/clear` 换会话、`/compact` 折
+ * 历史、`/resume` 换成另一场 —— 而正在跑的那一轮每一步都要从库里重读历史。
+ * 所以它们照旧排队(见 submitWhileBusy)。
+ *
+ * ★ 但这几条**只改一个 let**,而那几个 let 全是现取的:system prompt 每一步
+ *   重建,权限模式每次调用现问,视图和界面语言只影响下一帧。它们排队的唯一
+ *   后果就是"我按了开关,它要等这件事做完才理我" —— 而 `/agentflow` 恰恰是
+ *   用户在**看着它埋头自己干**的时候才想按的那一个。
+ *
+ * ⚠ 往里加东西之前先问一句:这条命令碰不碰会话历史、模型、或者正在跑的那一轮?
+ *   碰任何一样都不能进这张表。`/model` 就是这么被挡在外面的 —— 模型是在
+ *   turn 开始时定下来的(见 runner.start 的 input.model),中途换掉的话,
+ *   这一轮剩下的步数会带着一半属于另一家的思考块继续跑。
+ */
+const LIVE_COMMANDS = ["/setting", "/agentflow", "/think", "/permission", "/view", "/language"]
+
+export function isLiveCommand(text: string): boolean {
+  const name = text.trim().split(/\s+/)[0] ?? ""
+  return LIVE_COMMANDS.includes(name.toLowerCase())
+}
+
+/**
  * 斜杠命令。返回值见 SlashOutcome。
  * 故意做得很少 —— 每加一条都是一次「用户以为它是消息」的机会。
  *
@@ -2223,6 +2329,10 @@ async function slashCommand(
   const arg = (name: string) => text.slice(name.length).trim()
   if (text === "/permission" || text.startsWith("/permission ")) {
     permissionCommand(arg("/permission"), deps)
+    return true
+  }
+  if (text === "/setting" || text === "/settings" || text === "/config") {
+    settingCommand(deps)
     return true
   }
   if (text === "/view" || text.startsWith("/view ")) {
@@ -2415,6 +2525,9 @@ function agentflowCommand(arg: string, deps: InteractiveDeps): void {
   }
 
   deps.setAgentflow(next)
+  // ★ 同一件事说两遍:一遍给用户(下面那三行),一遍给模型。
+  //   只改 system 的话,一场聊了二十轮的会话里它基本不动 —— 见 noteToModel
+  if (next !== current) deps.noteToModel(flowNote(next))
   const head = theme.dim("  ") + theme.bold(next === false ? t.agentflowOff : t.agentflowOn(next, MAX_FLOW_ALIVE_JOBS))
   const hint = theme.dim(`  ${next === false ? t.agentflowOffHint : t.agentflowHint}`)
   // ★ 那句警告要在**开的时候**说,不是在第十个框弹出来的时候
@@ -2423,6 +2536,24 @@ function agentflowCommand(arg: string, deps: InteractiveDeps): void {
       ? `\n${theme.yellow(`  ⚠ ${t.agentflowConfirmWarning}`)}`
       : ""
   deps.reply(`${head}\n${hint}${warn}`)
+}
+
+/**
+ * 开关翻过来那一刻塞给模型的一句话。**导出是为了单测。**
+ *
+ * 措辞上三件事一件都不能少:
+ *   · 头一句写明「不是用户说的」。它是一条 user 消息(只有那个角色能在轮次
+ *     之间插进来),而模型读到 user 消息的第一反应是"人在跟我说话"。
+ *   · 说清**现在**是什么状态,连数字一起 —— 那两个数就是这个开关的全部内容。
+ *   · 明说**不用回头重做**。不说的话,一个刚被告知"现在要并行"的模型很可能
+ *     把已经做完的那半件事拆开重来一遍,而用户只是按了个开关。
+ */
+export function flowNote(flow: number | false): string {
+  const head = "Automated message, not from the user."
+  if (flow === false) {
+    return `${head} The user has just switched agentflow off. The "Agentflow is on" section is gone from your system prompt: back to ordinary working, up to ${MAX_AGENT_JOBS} subagents at a time, with no expectation that you fan work out. Carry on from where you are — nothing needs redoing.`
+  }
+  return `${head} The user has just switched agentflow on: up to ${MAX_FLOW_ALIVE_JOBS} subagents in flight, ${flow} of them running at once. Your system prompt now carries an "Agentflow is on" section — read it and work that way from here, whatever you have been doing so far in this conversation. Carry on from where you are; nothing already finished needs redoing.`
 }
 
 /** `/history-clean` 不写天数时清多久以前的。一周 —— 见 cleanHistoryCommand */
@@ -2579,6 +2710,23 @@ function resetCommand(arg: string, deps: InteractiveDeps, exit: () => void): voi
 }
 
 /**
+ * `/setting`:把所有设置摆在一屏上。
+ *
+ * ── 为什么这条命令自己几乎什么都不做 ──
+ * 那一屏要上下左右和一个能收字符的格子,而 --plain 和管道里没有那套东西。
+ * 所以这里只负责**判断有没有那一屏**:有就开,没有就退回它本来就有的出路 ——
+ * 一条条斜杠命令。退路里把命令名列出来,是因为这个人此刻正好证明了自己
+ * 记不住它们(不然他不会敲这一条)。
+ */
+function settingCommand(deps: InteractiveDeps): void {
+  if (deps.openSettings) {
+    deps.openSettings()
+    return
+  }
+  deps.reply(theme.dim(`  ${t.settingNoScreen}`))
+}
+
+/**
  * `/model [provider/model]`:看现在用的是哪个,或者当场换一个。
  *
  * ── 为什么换模型不清历史 ──
@@ -2600,6 +2748,14 @@ function modelCommand(arg: string, deps: InteractiveDeps): void {
 
   if (arg.length === 0) {
     const current = deps.spec()
+    // ★ 有那一屏就直接开在**模型那一页**上。不带参数的 `/model` 一直是这条
+    //   命令最常用的用法,而它今天的答案是"这是一张清单,现在请你把其中一行
+    //   手打回来" —— 那串模型名谁也记不住,补全也要重新敲一遍命令。
+    //   上下选一条按回车,是这件事本来就该有的样子
+    if (deps.openSettings) {
+      deps.openSettings("model")
+      return
+    }
     const lines = [theme.dim("  ") + t.modelCurrent(theme.bold(current)) + theme.dim(` · ${window}`)]
     const choices = deps.models.choices()
     if (choices.length === 0) lines.push(theme.dim(`  ${t.modelNoChoices}`))
@@ -3557,11 +3713,12 @@ async function fullscreen_(
   keyboard: Keyboard,
   transcript: Transcript,
   model: ChatModel,
+  /** 合成器由调用方给 —— 开场那张卡片和主界面共用同一个,见那边那颗星 */
+  screen: Screen,
   options: FullscreenOptions,
 ): Promise<number> {
   trimHistory()
   const editor = new Editor(loadHistory())
-  const screen = new Screen()
   /**
    * `@` 引用的文件索引。现在就开扫,不等第一次敲 `@` ——
    * 扫一个中等仓库要几十毫秒,而那几十毫秒正好落在用户读横幅的时候。
@@ -3587,11 +3744,78 @@ async function fullscreen_(
   // 命令的回答两个视图都要有 —— 只写瀑布流的话,session 视图下按了没反应
   deps.onReply((text) => chat.answer(text))
 
+  /**
+   * `/setting` 那一屏的内容。
+   *
+   * ★ 装在这儿而不是 main() 里,是因为它要碰 `chat` 和 `app` —— 视图和侧栏
+   *   的真值源在界面上,不在配置里。`--plain` 那条路上没有这两样,所以那边
+   *   也就没有这一屏(见 InteractiveDeps.openSettings)。
+   *
+   * ⚠ 每一格都是**现取**的函数,不是快照。这一屏每帧重算,而值随时会被别处
+   *   改掉(ctrl-b 收侧栏、子 agent 把信任标记翻过来、`/model` 换了模型)——
+   *   存一份下来的话,打开的这一屏画的是"打开那一刻"。
+   */
+  const settings = createSettings({
+    view: () => chat.view,
+    setView: (view) => {
+      chat.setView(view)
+      deps.view = view
+      // 两处都写,和 `/view` 一模一样:全局那份是"我一般要什么",文件夹那份
+      // 是"这个仓库要什么"。少写一处,用户会发现"我在这儿改了,回来又变回去了"
+      rememberView(view)
+      rememberFolderView(deps.root, view)
+    },
+    panels: () => app.panelsVisible,
+    setPanels: (on) => app.setPanels(on),
+    trust: () => deps.trust.state(),
+    trustedAt: () => deps.trust.at(),
+    setTrust: (state) => deps.trust.set(state),
+    checkTrust: () => {
+      // 已经在跑就说一声,别再派一个。两个 subagent 同时读同一堆文件,
+      // 回来还要互相盖掉对方的结论
+      if (deps.trust.running()) return t.trustCheckBusy
+      void deps.trust.check()
+      return undefined
+    },
+    mode: () => deps.gate.permissionMode,
+    setMode: (mode) => deps.setMode(mode),
+    thinking: () => deps.thinking(),
+    setThinking: (value) => deps.setThinking(value),
+    agentflow: () => deps.agentflow(),
+    setAgentflow: (value) => {
+      const before = deps.agentflow()
+      deps.setAgentflow(value)
+      // 和 `/agentflow` 同一条:只改 system 的话,一场聊久了的会话里它基本
+      // 不动。见 noteToModel
+      if (value !== before) deps.noteToModel(flowNote(value))
+    },
+    autoCompact: () => deps.autoCompact(),
+    setAutoCompact: (value) => deps.setAutoCompact(value),
+    checkCommand: () => deps.check.command(),
+    checkEnabled: () => deps.check.enabled(),
+    setCheckEnabled: (value) => deps.check.setEnabled(value),
+    language: (kind) => deps.language[kind],
+    setLanguage: (kind, value) => {
+      deps.language[kind] = value
+      // 界面语言立刻换掉;回答语言下一轮才生效 —— 它是塞进 system prompt 的
+      if (kind === "interface") setInterfaceLanguage(value)
+      rememberLanguage(kind, value)
+    },
+    model: () => deps.spec(),
+    modelChoices: () => deps.models.choices(),
+    switchModel: (spec) => deps.models.switch(spec),
+    modelBlockedBy: () => deps.models.rememberBlockedBy(),
+    providers: () => deps.models.providers(),
+    setKey: (id, apiKey) => deps.models.setKey(id, apiKey),
+    clearKey: (id) => deps.models.clearKey(id),
+  })
+
   const app = new App({
     screen,
     keyboard,
     editor,
     chat,
+    settings,
     root: deps.root,
     workspace: deps.workspace,
     label: () => deps.spec(),
@@ -3607,6 +3831,12 @@ async function fullscreen_(
     // 跑着的时候插的一句:直接递进正在跑的这一轮,它下一个轮次边界就看得见。
     // 回显走 chat.said —— 和正常那条路同一句,不然滚动记录里会缺一句用户的话
     onSubmitBusy: (text) => {
+      // 只改设置的那几条当场就办,不等这一轮结束 —— `/agentflow` 恰恰是用户
+      // 在**看着它埋头自己干**的时候才想按的那一个。见 isLiveCommand
+      if (isLiveCommand(text)) {
+        void slashCommand(text.trim(), deps, done, chat)
+        return "handled"
+      }
       if (!deps.submitWhileBusy(text)) return false
       chat.said(text)
       return true
@@ -3649,6 +3879,7 @@ async function fullscreen_(
   deps.onAsk((request) => app.askPermission(request, request.signal ?? deps.turnSignal()))
   deps.onInquire((question) => app.askQuestion(question, deps.turnSignal()))
   deps.openResume = () => app.openSessionPicker(sessionChoices(deps), deps.session.id)
+  deps.openSettings = (page) => app.openSettings(page)
   deps.upgradeUI = {
     open: (state, onCancel) => app.openUpgrade(state, onCancel),
     update: (patch) => app.updateUpgrade(patch),
@@ -3821,6 +4052,11 @@ async function boxed(deps: InteractiveDeps, keyboard: Keyboard): Promise<number>
     workspace: deps.workspace.path,
     onSubmit: (text) => void pump(text),
     onSubmitBusy: (text) => {
+      // 和全屏那边同一条:只改设置的当场就办。见 isLiveCommand
+      if (isLiveCommand(text)) {
+        void slashCommand(text.trim(), deps, done)
+        return "handled"
+      }
       if (!deps.submitWhileBusy(text)) return false
       for (const line of userLines(text)) deps.renderer.line(line)
       return true

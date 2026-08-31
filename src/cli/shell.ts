@@ -58,7 +58,8 @@ export interface ShellDeps {
    * 跑着的时候提交的那一句。返回 true = 宿主已经把它递进正在跑的这一轮了
    * (见 cli/main.ts 的 injectUser),不用再排队;false = 还得等这一轮结束。
    */
-  onSubmitBusy?(text: string): boolean
+  /** 见 tui/app.ts 的同名字段:true 递进去了 / false 排队 / "handled" 当场办完了 */
+  onSubmitBusy?(text: string): boolean | "handled"
   /** 用户要停掉当前这一轮 */
   onCancel(): void
   onExit(): void
@@ -181,7 +182,10 @@ export class Shell {
         if (this.busy) {
           // 先试着直接递进正在跑的这一轮 —— 排队要等它把整件事做完,而用户
           // 插这一句多半正是想拦住它现在在做的事
-          if (this.deps.onSubmitBusy?.(action.text) === true) {
+          const outcome = this.deps.onSubmitBusy?.(action.text)
+          // 当场办完了(只改设置的那几条命令):回执已经写过,不回显也不入队
+          if (outcome === "handled") break
+          if (outcome === true) {
             this.note = t.queuedLive
           } else {
             this.queued.push(action.text)
