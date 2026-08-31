@@ -1,0 +1,107 @@
+alfa
+Copyright 2026 Alfa Plus Laboratory
+
+Licensed under the Apache License, Version 2.0 (the "License"); see the
+LICENSE file in this repository, or http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------
+Name and marks
+--------------------------------------------------------------------------
+
+"alfa" is the name of this project. Section 6 of the License grants no
+permission to use it: you are free to fork and redistribute this code, but
+a fork published under its own identity should carry its own name, so that
+users can tell whose build they are running.
+
+--------------------------------------------------------------------------
+Ported source
+--------------------------------------------------------------------------
+
+Portions of this project are ported or adapted from opencode, and remain
+under the MIT License. This project is not a fork of opencode.
+
+  opencode — https://github.com/anomalyco/opencode
+  Copyright (c) 2025 opencode
+
+  Affected files:
+    src/permission/wildcard.ts    glob-style permission matching
+    src/permission/arity.ts       command prefix arity table
+    src/tool/edit/replace.ts      fuzzy replace cascade
+    src/prompt/templates/*.txt    system prompt templates
+    src/prompt/system.ts          (loader for the above templates)
+
+  MIT License
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+The system prompt templates carry a further lineage: opencode's own templates
+were derived from Anthropic's Claude Code, and phrasing from it survives in
+src/prompt/templates/*.txt. The templates here are substantially rewritten —
+instructions pointing at tools this project does not have were removed rather
+than commented out — but the debt is real and is recorded here rather than
+left implicit.
+
+--------------------------------------------------------------------------
+Character width data
+--------------------------------------------------------------------------
+
+The East Asian Wide / Fullwidth code point ranges in src/cli/width.ts and
+src/tool/background.ts are derived from Markus Kuhn's public-domain wcwidth.c
+implementation (https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c) and from the
+Unicode Character Database file EastAsianWidth.txt.
+
+  Unicode Character Database
+  Copyright (c) 1991-2024 Unicode, Inc. All rights reserved.
+  Distributed under the Unicode License, https://www.unicode.org/license.txt
+
+--------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------
+
+Binaries built from this repository embed the Bun runtime and the runtime
+dependencies below, including transitive ones. `bun build --compile` does not
+preserve their copyright headers in the produced binary, so this file is the
+notice that travels with the release.
+
+  Apache License 2.0
+    ai                                    https://github.com/vercel/ai
+    @ai-sdk/anthropic                     Copyright Vercel, Inc.
+    @ai-sdk/openai-compatible
+    @ai-sdk/provider
+    @ai-sdk/provider-utils
+    @ai-sdk/gateway
+    @vercel/oidc
+    @workflow/serde
+
+  MIT License
+    Bun                    Copyright (c) 2023 Oven                (oven-sh/bun)
+    zod                    Copyright (c) 2020 Colin McDonnell
+    undici                 Copyright (c) Matteo Collina and Undici contributors
+    eventsource-parser     Copyright (c) 2024 Espen Hovlandsdal
+    @standard-schema/spec
+
+  BSD 3-Clause License
+    diff                   Copyright (c) 2009-2015 Kevin Decker
+    json-schema            (dual licensed AFL-2.1 OR BSD-3-Clause; BSD applies)
+
+  ISC License
+    picocolors             Copyright (c) 2021 Oleksii Raspopov
+
+TypeScript is a build-time dependency only and is not embedded in the
+distributed binary.

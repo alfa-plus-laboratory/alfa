@@ -1,0 +1,184 @@
+# 发版:打一个 v* 的 tag,构建全平台二进制,发布到这个仓库的 release 页。
+#
+# ── 为什么产物就发在这儿 ──
+# 仓库是公开的,release 资产任何人都能匿名 curl。改名前不是这样:源码仓私有,
+# 私有仓的资产每次下载都要带 token,于是产物只能推到一个单独的公开分发仓
+# (apcode-dist),CI 得为此拿一把跨仓 PAT。转公开之后那个理由整个消失 ——
+# 分发仓、PAT、以及"空仓发不了 release"那一整段兜底都删掉了,
+# 这里只用 GitHub 自带的 GITHUB_TOKEN。
+#
+# ── 为什么一个 job 就能出五个平台 ──
+# bun --compile 支持交叉编译,它按 --target 下对应的运行时再打包。五个平台
+# 一台 ubuntu runner 全包了 —— 开五个 runner 的矩阵除了慢和贵没有任何好处。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # 手动跑一次用来验证流水线本身,产物不发布
+  workflow_dispatch:
+
+# 发 release 要写权限。只给这一条 —— 多给的每一条都是这个 workflow 被改坏时
+# 能造成的伤害的一部分
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ★ 钉死,不用 latest。
+      #
+      # `--compile` 出来的二进制**自带 runtime**:用户跑的是编译时那个 bun,
+      # 不是他自己机器上那个。所以这一行不是"用什么版本构建",而是**发出去的是
+      # 哪个运行时** —— 让它跟着 latest 漂,等于每次发版都换一次用户脚下的地板,
+      # 而换的那一次没有人测过。
+      #
+      # 真发生过(v0.7.2):latest 从 1.3.14 漂到 1.4.0,而 1.4.0 上
+      # `process.on("warning")` **不再抑制 bun 自己的默认打印**(见
+      # src/util/warnings.ts 那段:整套设计就压在"挂了监听器它就不打印"这条上)。
+      # 后果不是测试红那么简单 —— 全屏界面是差分合成器,一条不经过它的写入会把
+      # 后面每一帧都画在错位的底子上。CI 那次红,拦住的正是这样一个二进制。
+      #
+      # 升 bun 的正确做法是**先在本地把这一行改掉、全套跑绿、再提交**,
+      # 而不是让 runner 替你决定。
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # ★ 版本号对不上就**在这里停**。发出去之后再发现横幅写着 0.3.0 而
+      #   release 页是 v0.4.0,得再发一版才能修,而中间那版已经被人装上了
+      - name: Tag must match package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(bun --print 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json $pkg" >&2
+            exit 1
+          fi
+
+      # 发版前跑全套。一个连自己测试都没过的二进制不该被五台机器装上
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build every target
+        run: |
+          set -eu
+          mkdir -p dist
+          build() {
+            out="dist/alfa-$1$3"
+            echo "→ $out"
+            bun build --compile --target="$2" --outfile "$out" src/cli/main.ts
+          }
+          build linux-x64      bun-linux-x64      ""
+          build linux-arm64    bun-linux-arm64    ""
+          build darwin-x64     bun-darwin-x64     ""
+          build darwin-arm64   bun-darwin-arm64   ""
+          build windows-x64    bun-windows-x64    ".exe"
+
+      # install.sh 跟着 release 走。这样 `curl …/releases/latest/download/install.sh`
+      # 拿到的脚本和它即将下载的二进制来自同一次发布,版本天然一致 ——
+      # 从仓库 raw 取脚本的话,main 上的改动会跑在旧二进制前面
+      - name: Collect assets
+        run: |
+          set -eu
+          cp install.sh dist/install.sh
+          # Windows 那半边:同一次发布里的脚本和二进制版本天然一致
+          cp install.ps1 dist/install.ps1
+          # ★ 这两份必须跟着产物走。`bun --compile` 出来的二进制里,上游依赖的
+          #   版权行**一条都不剩**(Vercel、undici、diff 的都被剥掉了)——
+          #   于是 NOTICE 是署名条款唯一的兑现渠道。只发二进制 = 违约
+          cp LICENSE dist/LICENSE
+          cp NOTICE dist/NOTICE
+          cd dist
+          sha256sum alfa-* > checksums.txt
+          cat checksums.txt
+
+      # 幂等:同一个 tag 重跑一次不该炸。CI 会因为各种与代码无关的原因失败
+      # (token 过期、上游 500、runner 被回收),而那时候唯一的补救就是重跑 ——
+      # 一个只有第一次能成功的发布步骤,等于把重跑这条路堵死了
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          # 自带的那把,作用域就是这个仓库。之前这里是一把跨仓 PAT,
+          # 因为产物要推去别的仓 —— 现在不用了
+          GH_TOKEN: ${{ github.token }}
+          # 显式写死仓库。不写的话 gh 靠 checkout 的 remote 推断 —— 能work,
+          # 但那是一条隐式依赖,而这一步是发布
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+
+          # release 说明取**带说明的 tag** 里那段话:发版的人在打 tag 那一刻手边
+          # 正好有"这一版改了什么",而事后回到 release 页去补的人从来没有过。
+          # release 页是给外面看的,读它的人不一定看得懂中文 —— 这段一律英文。
+          #
+          # ★ tag 对象要自己取回来。checkout 给的是一个**轻量** ref:它直接指向
+          #   commit,tag 对象根本没下来 —— 而 `%(contents)` 在轻量 tag 上返回的是
+          #   **提交信息**。v0.4.0 就是这么发出去的:release 说明变成了一句
+          #   干巴巴的 "release: 0.4.0"。
+          git fetch --force --no-tags origin "refs/tags/$tag:refs/tags/$tag" || true
+          notes=""
+          if [ "$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)" = "tag" ]; then
+            notes="$(git tag -l --format='%(contents)' "$tag")"
+          fi
+          # 轻量 tag、或者上面那一步没成:落到通用那句。**绝不**拿提交信息顶上 ——
+          # 那是写给代码仓的,而且这个仓库的提交信息是中文的
+          if [ -z "${notes//[[:space:]]/}" ]; then
+            notes="Built from ${GITHUB_SHA}."
+          fi
+
+          # ★ 整块重试三次。
+          #
+          #   error checking for existing release: … tls: failed to verify certificate:
+          #   x509: certificate is not valid for any names, but wanted to match api.github.com
+          #
+          # 真发生过(v0.4.6 那次)。原因和代码无关 —— runner 的出口被中间设备拦了
+          # 一下,而那时候五个平台刚编完九十多兆,整个发布就这么丢了。
+          #
+          # 重试的是**整块**而不是单条命令:view → upload/edit 或 create 这一组本来
+          # 就是幂等的,所以哪怕上一次是"其实建成了但回话没收到",下一次进来会看到
+          # 它已经存在,走覆盖那条路 —— 这正是当初把发布步骤做成幂等的用处
+          publish() {
+            if gh release view "$tag" >/dev/null 2>&1; then
+              # 重跑要收敛到同一个结果,所以说明也一起更新 —— 只覆盖资产的话,
+              # 一次说明写错的发布就只能手动去点了
+              echo "release exists — replacing its assets and notes"
+              gh release upload "$tag" --clobber dist/* &&
+                gh release edit "$tag" --title "$tag" --notes "$notes"
+            else
+              gh release create "$tag" \
+                --title "$tag" \
+                --notes "$notes" \
+                dist/*
+            fi
+          }
+
+          attempt=1
+          until publish; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "publishing failed three times — giving up" >&2
+              exit 1
+            fi
+            echo "attempt $attempt failed; retrying in $((attempt * 15))s" >&2
+            sleep $((attempt * 15))
+            attempt=$((attempt + 1))
+          done
+
+      - name: Upload build artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: alfa-binaries
+          path: dist/
+          retention-days: 7

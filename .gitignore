@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+*.log
+
+# 本地凭据与状态
+.env
+.env.*
+
+# 在这个仓库里跑一次 alfa 就会有它 —— `/init` 建的 .alfa/ 装着 memory/,
+# 那是使用者自己的便条,不该被 `git add -A` 顺手带进提交
+.alfa/
+
+# 构建产物。注意别写成 bin/alfa* —— 那会连启动 shim
+# bin/alfa 一起忽略掉,而它是源码。
+bin/alfa-bin
+
+# 编辑器
+.DS_Store
+.idea/
+*.swp

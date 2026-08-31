@@ -1,0 +1,73 @@
+# 每次 push 和每个 PR 都跑一遍。
+#
+# ── 为什么单独一个 workflow ──
+# release.yml 也跑 typecheck + test,但它只在打 tag 时触发 —— 等到那时候才发现
+# 红的,已经晚了一整轮。公开仓收到的第一个外部 PR 更需要这个:没有它,评审要靠
+# 人肉判断"这段改动会不会把测试搞红"。
+#
+# ── bun 版本和 release.yml 钉在同一个数上 ──
+# 两边漂开的话,CI 绿而发布红(或者更糟:反过来),而那种失败没有任何线索指向
+# "两个 workflow 用了不同的运行时"。改版本要同时改两处。
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 钉死,理由见 release.yml 那段 ★
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      # ★ 三条架构边界。它们守的东西没有一条会让测试变红 —— 破了照样跑得好好的,
+      #   只是把设计悄悄拆了,而那种拆是**几个月后**才以别的形式冒出来的。
+      #   README 的「架构边界」一节解释了每一条在防什么。
+      - name: Architecture guards
+        run: |
+          set -eu
+          fail=0
+
+          # LLM SDK 只允许住在 src/llm/ 里。工具和 prompt 层一旦直接 import 它,
+          # "换一个 provider" 就从改一个文件变成改一片
+          if grep -rnE 'from "(ai|@ai-sdk/)' src/tool src/agent src/prompt src/cli; then
+            echo "::error::src/{tool,agent,prompt,cli} must not import the LLM SDK — it belongs in src/llm/" >&2
+            fail=1
+          fi
+
+          # 颜色只从 theme.ts 出。散着 import 的话,主题就不再是一个可切换的东西
+          if grep -rn 'from "picocolors"' src | grep -v '^src/cli/theme.ts:'; then
+            echo "::error::picocolors may only be imported by src/cli/theme.ts" >&2
+            fail=1
+          fi
+
+          # 裸控制字符在 diff 和 grep 里是**隐形的** —— 写成 \u001b 才看得见,
+          # 而看不见的字符是改坏了也没人发现的那一类。
+          #
+          # ★ 只扫**被跟踪的**文件。直接扫 bin/ 会命中 `bun run build` 出来的
+          #   那个九十多兆的二进制(里面当然全是控制字符),于是这条守卫在任何
+          #   本地构建过的机器上都是红的 —— 一条总是红的检查等于没有这条检查
+          if git ls-files -z src script test bin | xargs -0 grep -lP '[\x00-\x08\x0b\x0c\x0e-\x1f]'; then
+            echo "::error::raw control characters in source — write them as \\u001b escapes" >&2
+            fail=1
+          fi
+
+          exit "$fail"
