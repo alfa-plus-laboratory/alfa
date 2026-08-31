@@ -12,7 +12,7 @@
  * 就是两边共用的那点东西:快照的形状、名字的分配、以及 agent 那一侧的接口。
  *
  * ── 为什么 AgentJobs 只是个接口 ──
- * 子 agent 要起一整个 Loop,而 `src/tool` 不认识循环(见 README 的架构边界)。
+ * 子 agent 要起一整个 Loop,而 `src/tool` 不认识循环(见 DESIGN.md 的架构边界)。
  * 实现住在 `src/agent/subagent.ts`,由 CLI 在造 ToolContext 时注入进来。
  * 这里只声明「它得能干什么」。
  */
@@ -237,7 +237,7 @@ const NAME_COLUMNS = 16
 /**
  * 按**显示宽度**截断。
  *
- * 刻意不 import cli/width.ts:那是渲染层,而这里是工具层(见 README 的架构边界)。
+ * 刻意不 import cli/width.ts:那是渲染层,而这里是工具层(见 DESIGN.md 的架构边界)。
  * 要判的东西也简单得多 —— 只有"中日韩算两列"这一条,不需要那边整套的
  * 组合字符/变体选择子处理。
  */

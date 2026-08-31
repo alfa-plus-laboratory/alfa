@@ -162,7 +162,7 @@ export interface ToolContext {
    * 后台跑着的子 agent(见 agent/subagent.ts)。
    *
    * ★ 它是**注入**进来的,不是 import 进来的 —— 子 agent 要起一整个 Loop,
-   *   而 src/tool 不认识循环(见 README 的架构边界)。这里只认接口。
+   *   而 src/tool 不认识循环(见 DESIGN.md 的架构边界)。这里只认接口。
    *   没接 = 这个宿主起不了子 agent,`task` 工具会照实说。
    */
   agents?: AgentJobs
@@ -193,7 +193,7 @@ export interface ToolContext {
  * 上下文占用的**形状**。
  *
  * 只声明形状、不 import `src/agent/context.ts` 的 ContextReport:`src/tool`
- * 不认识循环(见 README 的架构边界)。值由 CLI 层在造 ToolContext 时注入。
+ * 不认识循环(见 DESIGN.md 的架构边界)。值由 CLI 层在造 ToolContext 时注入。
  */
 export interface ContextView {
   /** 现在占了多少 token */

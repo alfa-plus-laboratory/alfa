@@ -18,7 +18,7 @@
  * 的时候才被调用一次 —— 那一刻这个数字才有决策价值。
  *
  * ── 边界 ──
- * `src/tool` 不认识循环(见 README 的架构边界),所以这里不自己算报告:形状在
+ * `src/tool` 不认识循环(见 DESIGN.md 的架构边界),所以这里不自己算报告:形状在
  * types.ts 上声明,值由 CLI 层在造 ToolContext 时注入(见 cli/main.ts)。
  */
 import { z } from "zod"
@@ -136,7 +136,7 @@ function label(key: string): string {
  * `306k`、`1.2M`。
  *
  * 自己写一个而不是用 cli/render.ts 那个:`src/tool` 不 import `src/cli`
- * (见 README 的架构边界)。而且这两处受众不同 —— 那个要挤进一格状态行,
+ * (见 DESIGN.md 的架构边界)。而且这两处受众不同 —— 那个要挤进一格状态行,
  * 这个是给模型读的一行字,以后各自改各自的。
  */
 function num(value: number): string {
