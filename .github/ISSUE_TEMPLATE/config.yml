@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/alfa-plus-laboratory/alfa/security/advisories/new
+    about: Permission bypasses, sandbox escapes and credential exposure are reported privately.

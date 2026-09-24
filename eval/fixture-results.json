@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-09-20T17:45:47.006Z",
+  "results": [
+    {
+      "task": "csv-quotes",
+      "mode": "fixture-validation-only",
+      "model": null,
+      "completed": null,
+      "acceptancePassed": true,
+      "elapsedMs": 9,
+      "apiCostUSD": null,
+      "pricingSource": null,
+      "metrics": null,
+      "attempt": null,
+      "recovery": null,
+      "recoveryMetrics": null,
+      "cwd": "/var/folders/cf/66jcm4f173sdmtzg1gp94xm80000gn/T/alfa-eval-csv-quotes-jvkSJP",
+      "tests": {
+        "exit": 0,
+        "stdout": "bun test v1.3.14 (0d9b296a)\n",
+        "stderr": "\nacceptance.test.ts:\n(pass) quoted fields [0.11ms]\n\ncsv.test.ts:\n(pass) basic [0.01ms]\n\n 2 pass\n 0 fail\n 3 expect() calls\nRan 2 tests across 2 files. [5.00ms]\n"
+      }
+    },
+    {
+      "task": "pagination",
+      "mode": "fixture-validation-only",
+      "model": null,
+      "completed": null,
+      "acceptancePassed": true,
+      "elapsedMs": 10,
+      "apiCostUSD": null,
+      "pricingSource": null,
+      "metrics": null,
+      "attempt": null,
+      "recovery": null,
+      "recoveryMetrics": null,
+      "cwd": "/var/folders/cf/66jcm4f173sdmtzg1gp94xm80000gn/T/alfa-eval-pagination-NlGVHQ",
+      "tests": {
+        "exit": 0,
+        "stdout": "bun test v1.3.14 (0d9b296a)\n",
+        "stderr": "\nacceptance.test.ts:\n(pass) page contract [0.36ms]\n\npage.test.ts:\n(pass) result is text [0.01ms]\n\n 2 pass\n 0 fail\n 7 expect() calls\nRan 2 tests across 2 files. [5.00ms]\n"
+      }
+    },
+    {
+      "task": "retry-cancel",
+      "mode": "fixture-validation-only",
+      "model": null,
+      "completed": null,
+      "acceptancePassed": true,
+      "elapsedMs": 9,
+      "apiCostUSD": null,
+      "pricingSource": null,
+      "metrics": null,
+      "attempt": null,
+      "recovery": null,
+      "recoveryMetrics": null,
+      "cwd": "/var/folders/cf/66jcm4f173sdmtzg1gp94xm80000gn/T/alfa-eval-retry-cancel-3WoDul",
+      "tests": {
+        "exit": 0,
+        "stdout": "bun test v1.3.14 (0d9b296a)\n",
+        "stderr": "\nacceptance.test.ts:\n(pass) limits and abort [0.66ms]\n\nretry.test.ts:\n(pass) success [0.03ms]\n\n 2 pass\n 0 fail\n 6 expect() calls\nRan 2 tests across 2 files. [5.00ms]\n"
+      }
+    }
+  ]
+}

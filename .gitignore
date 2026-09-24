@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+*.log
+
+# Local credentials and state
+.env
+.env.*
+
+# Running alfa once in this repo creates it — the .alfa/ that `/init` makes holds
+# memory/, which is the user's own notes and shouldn't ride into a commit via `git add -A`
+.alfa/
+
+# Build output. Careful not to write bin/alfa* — that would also ignore the launcher shim
+# bin/alfa, which is source.
+bin/alfa-bin
+
+# Editors
+.DS_Store
+.idea/
+*.swp

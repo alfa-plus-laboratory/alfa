@@ -1,0 +1,205 @@
+# Release: push a v* tag, build binaries for every platform, publish to this repo's
+# releases page.
+#
+# ── Why the artifacts are published right here ──
+# The repo is public, so anyone can curl release assets anonymously. Before the rename it
+# wasn't: the source repo was private, and private-repo assets need a token on every
+# download, so artifacts had to be pushed to a separate public distribution repo
+# (apcode-dist), and CI needed a cross-repo PAT for it. Going public made that reason
+# disappear entirely — the distribution repo, the PAT, and the whole fallback for "can't
+# create a release in an empty repo" were all deleted; this only uses GitHub's built-in
+# GITHUB_TOKEN.
+#
+# ── Why one job can produce five platforms ──
+# bun --compile supports cross-compilation: it downloads the runtime for the --target and
+# packages against it. One ubuntu runner covers all five platforms — a five-runner matrix
+# would buy nothing but slowness and cost.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # A manual run is for verifying the pipeline itself; artifacts aren't published
+  workflow_dispatch:
+
+# Publishing a release needs write permission. Grant only this — every extra permission
+# is part of the damage this workflow could do if it were tampered with
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Keep release binaries on the same known image while ubuntu-latest migrates to
+    # 26.04. Move this deliberately after compiling and smoke-testing every target.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # ★ Pinned, not latest.
+      #
+      # A `--compile` binary **carries its own runtime**: users run the bun it was compiled
+      # with, not the one on their own machine. So this line isn't "which version to build
+      # with", it's **which runtime ships** — letting it drift with latest means swapping
+      # the floor under users' feet on every release, and nobody tested that swap.
+      #
+      # It really happened (v0.7.2): latest drifted from 1.3.14 to 1.4.0, and on 1.4.0
+      # `process.on("warning")` **no longer suppresses bun's own default printing** (see
+      # the note in src/util/warnings.ts: the whole design rests on "once a listener is
+      # attached, it doesn't print"). The consequence is worse than a red test — the
+      # fullscreen UI is a diffing compositor, and one write that bypasses it draws every
+      # later frame on a misaligned base. That red CI run stopped exactly such a binary.
+      #
+      # The right way to upgrade bun is to **change this line locally first, get the full
+      # suite green, then commit** — not to let the runner decide for you.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # ★ If the version numbers don't match, **stop here**. Find out after publishing that
+      #   the banner says 0.3.0 while the releases page says v0.4.0, and it takes another
+      #   release to fix — by which time people have installed the one in between
+      - name: Tag must match package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(bun --print 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json $pkg" >&2
+            exit 1
+          fi
+
+      # Run the full suite before releasing. A binary that fails its own tests shouldn't
+      # get installed on five platforms
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build every target
+        run: |
+          set -eu
+          mkdir -p dist
+          build() {
+            out="dist/alfa-$1$3"
+            echo "→ $out"
+            bun build --compile --target="$2" --outfile "$out" src/cli/main.ts
+          }
+          build linux-x64      bun-linux-x64      ""
+          build linux-arm64    bun-linux-arm64    ""
+          build darwin-x64     bun-darwin-x64     ""
+          build darwin-arm64   bun-darwin-arm64   ""
+          build windows-x64    bun-windows-x64    ".exe"
+
+      # install.sh ships with the release. That way the script fetched by
+      # `curl …/releases/latest/download/install.sh` and the binary it's about to download
+      # come from the same release, so their versions match by construction — fetch the
+      # script from the repo's raw files and changes on main would run ahead of the old
+      # binary
+      - name: Collect assets
+        run: |
+          set -eu
+          cp install.sh dist/install.sh
+          # The Windows half: script and binary from the same release match by construction
+          cp install.ps1 dist/install.ps1
+          # ★ These two must ship with the artifacts. In a `bun --compile` binary, **not a
+          #   single one** of the upstream dependencies' copyright lines survives (Vercel's,
+          #   undici's and diff's are all stripped) — so NOTICE is the only way the
+          #   attribution clauses get honored. Shipping only the binary = breach of license
+          cp LICENSE dist/LICENSE
+          cp NOTICE dist/NOTICE
+          cd dist
+          sha256sum alfa-* > checksums.txt
+          cat checksums.txt
+
+      # Idempotent: rerunning the same tag must not blow up. CI fails for all sorts of
+      # reasons unrelated to the code (expired token, upstream 500, runner reclaimed), and
+      # then the only remedy is a rerun — a publish step that can only succeed the first
+      # time blocks off that road entirely
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          # The built-in token, scoped to this repo. This used to be a cross-repo PAT,
+          # because artifacts were pushed to another repo — no longer needed
+          GH_TOKEN: ${{ github.token }}
+          # Hard-code the repo explicitly. Otherwise gh infers it from the checkout's remote
+          # — which works, but it's an implicit dependency, and this step is the release
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+
+          # Release notes come from the message of an **annotated tag**: at the moment of
+          # tagging, whoever cuts the release has "what changed in this version" right at
+          # hand, whereas nobody has ever gone back to the releases page afterwards to fill
+          # it in. The releases page is for outsiders, whose readers may not read Chinese —
+          # so this text is always in English.
+          #
+          # ★ The tag object has to be fetched explicitly. checkout gives a **lightweight**
+          #   ref: it points straight at the commit and the tag object never comes down —
+          #   and on a lightweight tag `%(contents)` returns **the commit message**. That's
+          #   how v0.4.0 went out: its release notes became a bare "release: 0.4.0".
+          git fetch --force --no-tags origin "refs/tags/$tag:refs/tags/$tag" || true
+          notes=""
+          if [ "$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)" = "tag" ]; then
+            notes="$(git tag -l --format='%(contents)' "$tag")"
+          fi
+          # Lightweight tag, or the step above failed: fall back to the generic line.
+          # **Never** substitute the commit message — that's written for the code repo,
+          # not for readers of the releases page (see v0.4.0 above)
+          if [ -z "${notes//[[:space:]]/}" ]; then
+            notes="Built from ${GITHUB_SHA}."
+          fi
+
+          # ★ Retry the whole block three times.
+          #
+          #   error checking for existing release: … tls: failed to verify certificate:
+          #   x509: certificate is not valid for any names, but wanted to match api.github.com
+          #
+          # It really happened (the v0.4.6 release). The cause had nothing to do with the
+          # code — the runner's egress was briefly intercepted by a middlebox, just as five
+          # platforms' worth of ninety-something MB had finished compiling, and the whole
+          # release was lost like that.
+          #
+          # What's retried is **the whole block**, not a single command: the view →
+          # upload/edit or create group is idempotent to begin with, so even if last time
+          # was "it actually got created but the response never arrived", the next attempt
+          # sees it already exists and takes the overwrite path — which is exactly what
+          # making the publish step idempotent was for
+          publish() {
+            if gh release view "$tag" >/dev/null 2>&1; then
+              # A rerun has to converge on the same result, so the notes get updated too
+              # — if only the assets were overwritten, a release with wrong notes could
+              # only be fixed by clicking through by hand
+              echo "release exists — replacing its assets and notes"
+              gh release upload "$tag" --clobber dist/* &&
+                gh release edit "$tag" --title "$tag" --notes "$notes"
+            else
+              gh release create "$tag" \
+                --title "$tag" \
+                --notes "$notes" \
+                dist/*
+            fi
+          }
+
+          attempt=1
+          until publish; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "publishing failed three times — giving up" >&2
+              exit 1
+            fi
+            echo "attempt $attempt failed; retrying in $((attempt * 15))s" >&2
+            sleep $((attempt * 15))
+            attempt=$((attempt + 1))
+          done
+
+      - name: Upload build artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: alfa-binaries
+          path: dist/
+          retention-days: 7

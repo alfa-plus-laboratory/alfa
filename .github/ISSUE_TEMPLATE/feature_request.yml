@@ -1,0 +1,19 @@
+name: Feature request
+description: Something alfa should do that it doesn't
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and where alfa got in the way. Describe the problem before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like instead
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: How other tools handle it (optional)
