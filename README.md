@@ -89,23 +89,13 @@ While it works, the line above the input shows what it's doing (thinking, writin
 
 `--plain` and `--no-mouse` are compatibility aliases. `/view` explains the migration. The old full-screen panes, mascot, mouse interface and layout settings are retired. Existing `view` / `panels` keys are ignored and removed on the next configuration save. `-p` and piped input do not acquire the interactive terminal.
 
-## Permissions and multiple directories
+## Permissions
 
-**Default mode allows ordinary workspace reads and edits/writes. Every edit/write diff is recorded.** Sensitive files and commands, network tools and extension tools have stricter rules. `confirm` asks for every gated action, including ordinary reads, edits and commands already allowed by rules; `auto` is alfa's primary autonomous mode, modeled on Claude Code's. Reads and edits inside the workspace run silently. Everything else is scored by a classifier (how directly you asked for it, against how much it could cost). That includes the project's own build/test scripts, whose code the classifier is shown, and edits to protected paths like `.git`, `.husky` or shell rc files. A risky operation you didn't clearly ask for goes back to the agent, which changes approach or asks you, and after repeated blocks auto pauses and asks you. Deny rules and your sandbox setting still apply, and the first read outside the workspace asks once. Command output and subagent reports are checked for prompt injection before the model reads them. The classifier uses the conversation's model unless you pick another in `/settings`. There is no separate, non-overridable command blacklist in any mode. Switching back stops active work and restores normal rules.
+alfa works on its own by default (`auto`). Reads and edits in the workspace just happen; anything else goes past a classifier that weighs how clearly you asked for it against what it could cost. Something risky you didn't ask for goes back to alfa to find another way, or to ask you. Reaching outside the workspace asks you first; `/access` manages what you've granted.
 
-The initial folder is one work root. Outside paths prompt with the resolved real path and operation. Choose once, session or persistent authorization; a file grant does not grant its parent directory. Directory prompts explicitly cover descendants. Manage broader roots yourself:
+If you'd rather approve things yourself, Shift-Tab switches to `default` (workspace reads and edits go through, the rest asks you) or `confirm` (everything asks you).
 
-```text
-/access
-/access add read session /path/to/neighbor
-/access add write persistent /path/to/second-repo
-/access revoke /path/to/second-repo
-/access revoke all
-```
-
-Read grants do not authorize writes. Session grants clear when switching sessions; persistent grants are stored per initial root. Revoking stops running jobs and subagents and interrupts the active turn. Symlinks and nonexistent paths are resolved through their existing ancestors. Credentials and protected system paths remain restricted. A rejected request differs from an authorized operation that subsequently fails.
-
-**The permission gate is not an OS sandbox.** OS sandboxing is experimental and off by default; enable it in Settings if needed. Platform support is incomplete. When enabled, in every permission mode including auto, shell and automatic checks receive the configured filesystem sandbox built from the same grants; descendants inherit it. macOS permits system runtime reads plus granted paths and denies known credential stores; Linux uses bubblewrap mounts. These are filesystem restrictions, not complete machine isolation: network access, runtime directories, platform differences and concurrent filesystem changes still matter. Secret files are more restrictive in shell than in individually approved file reads. MCP servers and explicitly trusted extensions run as host processes, not inside this shell sandbox.
+This is judgment, not isolation: what alfa runs has your account's access. An experimental OS sandbox for shell commands can be turned on in `/settings`.
 
 ## Extend and evaluate
 
