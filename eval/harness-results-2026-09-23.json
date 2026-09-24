@@ -1,0 +1,689 @@
+{
+  "date": "2026-09-23",
+  "model": "MINIMAX/MiniMax-M3",
+  "permission": "default",
+  "sandbox": true,
+  "preflight": {
+    "source": {
+      "model": "MINIMAX/MiniMax-M3",
+      "permission": "default",
+      "candidateSourceHash": "f1909a7488c575fc39854013bc014ee04612b4565794c7121485c4d51db34876",
+      "baselineSource": "/tmp/alfa-comparison.JOvRD7/baseline",
+      "note": "Inherited user config; only CLI permission mode overridden. Existing sandbox preference preserved."
+    },
+    "artifactDirectory": "/tmp/alfa-default-comparison-c5z27zgy",
+    "codingStatus": "Stopped after confirming shared Bun/JSC SIGTRAP from denied macOS ICU timezone data. Completed reports retained in coding-partial-manifest.json; no coding success aggregate claimed.",
+    "runtime": {
+      "baseline": {
+        "attempts": 21,
+        "environmentFirst": 3,
+        "attemptsWithSuccessfulEnvironmentRead": 3,
+        "humanReviews": 0,
+        "usage": {
+          "requests": 29,
+          "observedRequests": 29,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 423666,
+            "output": 25175,
+            "cacheRead": 127899,
+            "cacheWrite": 0,
+            "uncachedInput": 295767
+          },
+          "tokens": {
+            "input": 423666,
+            "output": 25175,
+            "cacheRead": 127899,
+            "cacheWrite": 0,
+            "uncachedInput": 295767
+          },
+          "cacheReadRate": 0.3018863916386965,
+          "apiCostUSD": null,
+          "approvals": 1,
+          "interruptions": 0
+        }
+      },
+      "candidate": {
+        "attempts": 21,
+        "environmentFirst": 7,
+        "attemptsWithSuccessfulEnvironmentRead": 7,
+        "humanReviews": 0,
+        "usage": {
+          "requests": 28,
+          "observedRequests": 28,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 395586,
+            "output": 19962,
+            "cacheRead": 121096,
+            "cacheWrite": 0,
+            "uncachedInput": 274490
+          },
+          "tokens": {
+            "input": 395586,
+            "output": 19962,
+            "cacheRead": 121096,
+            "cacheWrite": 0,
+            "uncachedInput": 274490
+          },
+          "cacheReadRate": 0.3061180122653481,
+          "apiCostUSD": null,
+          "approvals": 0,
+          "interruptions": 0
+        }
+      }
+    }
+  },
+  "controlledRerun": {
+    "status": "complete",
+    "artifactDirectory": "/tmp/alfa-fixed-comparison-rybwbtws",
+    "baselineAdjustment": "HEAD plus the same read-only macOS timezone runtime fix as candidate. Candidate also restores generic for third-party non-Claude Anthropic-compatible models.",
+    "source": {
+      "model": "MINIMAX/MiniMax-M3",
+      "permission": "default",
+      "sandbox": true,
+      "baselineCommit": "c563e778c3b59de2717721274191df5ff99072d1",
+      "baselineAdjustment": "Only the same read-only macOS ICU timezone root fix as the candidate, so Bun test can execute in both variants.",
+      "baselineSourceHash": "610ab7dd4335239adbce020674134eea60d417e1bc8276b99388c32effc29dac",
+      "candidateSourceHash": "33152e26a1f9bb06d8059ff971037fd6b5abe1c14c9496d186225135f880c002",
+      "sourceHashAlgorithm": "sha256 of sorted relative path, NUL, bytes, NUL for src/** and package.json"
+    },
+    "variants": {
+      "baseline": {
+        "coding": {
+          "scoredAttempts": 9,
+          "passed": 8,
+          "excludedAmbiguousPaginationAttempts": 3,
+          "correctedPaginationTaskSetHash": "b18590757b0334e7806320643f588e1acd996cb912f9d60eb989bf3beb257ecf",
+          "results": [
+            {
+              "task": "csv-quotes",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 82007,
+              "usage": {
+                "requests": 10,
+                "observedRequests": 10,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 180191,
+                  "output": 7600,
+                  "cacheRead": 157960,
+                  "cacheWrite": 0,
+                  "uncachedInput": 22231
+                },
+                "tokens": {
+                  "input": 180191,
+                  "output": 7600,
+                  "cacheRead": 157960,
+                  "cacheWrite": 0,
+                  "uncachedInput": 22231
+                },
+                "cacheReadRate": 0.8766253586472132,
+                "apiCostUSD": null,
+                "approvals": 2,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 53194,
+              "usage": {
+                "requests": 13,
+                "observedRequests": 13,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 230941,
+                  "output": 6554,
+                  "cacheRead": 209049,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21892
+                },
+                "tokens": {
+                  "input": 230941,
+                  "output": 6554,
+                  "cacheRead": 209049,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21892
+                },
+                "cacheReadRate": 0.9052052255770955,
+                "apiCostUSD": null,
+                "approvals": 1,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "csv-quotes",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 49352,
+              "usage": {
+                "requests": 11,
+                "observedRequests": 11,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 191754,
+                  "output": 5780,
+                  "cacheRead": 171205,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20549
+                },
+                "tokens": {
+                  "input": 191754,
+                  "output": 5780,
+                  "cacheRead": 171205,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20549
+                },
+                "cacheReadRate": 0.8928366552979338,
+                "apiCostUSD": null,
+                "approvals": 0,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 48796,
+              "usage": {
+                "requests": 13,
+                "observedRequests": 13,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 231657,
+                  "output": 6192,
+                  "cacheRead": 210483,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21174
+                },
+                "tokens": {
+                  "input": 231657,
+                  "output": 6192,
+                  "cacheRead": 210483,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21174
+                },
+                "cacheReadRate": 0.9085976249368679,
+                "apiCostUSD": null,
+                "approvals": 3,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "csv-quotes",
+              "repetition": 3,
+              "passed": true,
+              "elapsedMs": 62556,
+              "usage": {
+                "requests": 9,
+                "observedRequests": 9,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 182403,
+                  "output": 11343,
+                  "cacheRead": 156302,
+                  "cacheWrite": 0,
+                  "uncachedInput": 26101
+                },
+                "tokens": {
+                  "input": 182403,
+                  "output": 11343,
+                  "cacheRead": 156302,
+                  "cacheWrite": 0,
+                  "uncachedInput": 26101
+                },
+                "cacheReadRate": 0.8569047658207376,
+                "apiCostUSD": null,
+                "approvals": 1,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 3,
+              "passed": true,
+              "elapsedMs": 46897,
+              "usage": {
+                "requests": 8,
+                "observedRequests": 8,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 147709,
+                  "output": 7193,
+                  "cacheRead": 125805,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21904
+                },
+                "tokens": {
+                  "input": 147709,
+                  "output": 7193,
+                  "cacheRead": 125805,
+                  "cacheWrite": 0,
+                  "uncachedInput": 21904
+                },
+                "cacheReadRate": 0.8517084267038569,
+                "apiCostUSD": null,
+                "approvals": 3,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 66423,
+              "usage": {
+                "requests": 12,
+                "observedRequests": 12,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 195392,
+                  "output": 5175,
+                  "cacheRead": 175305,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20087
+                },
+                "tokens": {
+                  "input": 195392,
+                  "output": 5175,
+                  "cacheRead": 175305,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20087
+                },
+                "cacheReadRate": 0.8971964051752375,
+                "apiCostUSD": null,
+                "approvals": 0,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 65380,
+              "usage": {
+                "requests": 17,
+                "observedRequests": 17,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 297306,
+                  "output": 5905,
+                  "cacheRead": 279772,
+                  "cacheWrite": 0,
+                  "uncachedInput": 17534
+                },
+                "tokens": {
+                  "input": 297306,
+                  "output": 5905,
+                  "cacheRead": 279772,
+                  "cacheWrite": 0,
+                  "uncachedInput": 17534
+                },
+                "cacheReadRate": 0.9410237263963728,
+                "apiCostUSD": null,
+                "approvals": 1,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 3,
+              "passed": false,
+              "elapsedMs": 47566,
+              "usage": {
+                "requests": 13,
+                "observedRequests": 13,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 220990,
+                  "output": 6130,
+                  "cacheRead": 199994,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20996
+                },
+                "tokens": {
+                  "input": 220990,
+                  "output": 6130,
+                  "cacheRead": 199994,
+                  "cacheWrite": 0,
+                  "uncachedInput": 20996
+                },
+                "cacheReadRate": 0.9049911760713154,
+                "apiCostUSD": null,
+                "approvals": 1,
+                "interruptions": 0
+              }
+            }
+          ],
+          "hiddenAcceptancePassed": 9,
+          "verifiedSuccessfulAgentTestRuns": 8,
+          "selfRunCriterion": "At least one persisted agent-dispatched bun test completed with exit 0 and no abort or timeout; evaluator test commands excluded. This does not prove the final edited revision was tested."
+        },
+        "runtime": {
+          "attempts": 21,
+          "successfulEnvironmentReads": 2,
+          "humanReviews": 0
+        }
+      },
+      "candidate": {
+        "coding": {
+          "scoredAttempts": 9,
+          "passed": 8,
+          "excludedAmbiguousPaginationAttempts": 3,
+          "correctedPaginationTaskSetHash": "b18590757b0334e7806320643f588e1acd996cb912f9d60eb989bf3beb257ecf",
+          "results": [
+            {
+              "task": "csv-quotes",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 68282,
+              "usage": {
+                "requests": 13,
+                "observedRequests": 13,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 235397,
+                  "output": 10501,
+                  "cacheRead": 209472,
+                  "cacheWrite": 0,
+                  "uncachedInput": 25925
+                },
+                "tokens": {
+                  "input": 235397,
+                  "output": 10501,
+                  "cacheRead": 209472,
+                  "cacheWrite": 0,
+                  "uncachedInput": 25925
+                },
+                "cacheReadRate": 0.8898669056954847,
+                "apiCostUSD": null,
+                "approvals": 2,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 84338,
+              "usage": {
+                "requests": 17,
+                "observedRequests": 17,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 317950,
+                  "output": 8051,
+                  "cacheRead": 295627,
+                  "cacheWrite": 0,
+                  "uncachedInput": 22323
+                },
+                "tokens": {
+                  "input": 317950,
+                  "output": 8051,
+                  "cacheRead": 295627,
+                  "cacheWrite": 0,
+                  "uncachedInput": 22323
+                },
+                "cacheReadRate": 0.9297908476175499,
+                "apiCostUSD": null,
+                "approvals": 7,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "csv-quotes",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 81397,
+              "usage": {
+                "requests": 9,
+                "observedRequests": 9,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 166968,
+                  "output": 9547,
+                  "cacheRead": 143067,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23901
+                },
+                "tokens": {
+                  "input": 166968,
+                  "output": 9547,
+                  "cacheRead": 143067,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23901
+                },
+                "cacheReadRate": 0.8568528101193043,
+                "apiCostUSD": null,
+                "approvals": 2,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 305638,
+              "usage": {
+                "requests": 51,
+                "observedRequests": 51,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 975090,
+                  "output": 8387,
+                  "cacheRead": 766464,
+                  "cacheWrite": 0,
+                  "uncachedInput": 208626
+                },
+                "tokens": {
+                  "input": 975090,
+                  "output": 8387,
+                  "cacheRead": 766464,
+                  "cacheWrite": 0,
+                  "uncachedInput": 208626
+                },
+                "cacheReadRate": 0.786044365135526,
+                "apiCostUSD": null,
+                "approvals": 24,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "csv-quotes",
+              "repetition": 3,
+              "passed": false,
+              "elapsedMs": 131536,
+              "usage": {
+                "requests": 23,
+                "observedRequests": 23,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 442627,
+                  "output": 16771,
+                  "cacheRead": 412319,
+                  "cacheWrite": 0,
+                  "uncachedInput": 30308
+                },
+                "tokens": {
+                  "input": 442627,
+                  "output": 16771,
+                  "cacheRead": 412319,
+                  "cacheWrite": 0,
+                  "uncachedInput": 30308
+                },
+                "cacheReadRate": 0.931526996771548,
+                "apiCostUSD": null,
+                "approvals": 12,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "retry-cancel",
+              "repetition": 3,
+              "passed": true,
+              "elapsedMs": 57749,
+              "usage": {
+                "requests": 13,
+                "observedRequests": 13,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 244024,
+                  "output": 7286,
+                  "cacheRead": 220941,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23083
+                },
+                "tokens": {
+                  "input": 244024,
+                  "output": 7286,
+                  "cacheRead": 220941,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23083
+                },
+                "cacheReadRate": 0.9054068452283381,
+                "apiCostUSD": null,
+                "approvals": 4,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 1,
+              "passed": true,
+              "elapsedMs": 123357,
+              "usage": {
+                "requests": 20,
+                "observedRequests": 20,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 366850,
+                  "output": 6608,
+                  "cacheRead": 343590,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23260
+                },
+                "tokens": {
+                  "input": 366850,
+                  "output": 6608,
+                  "cacheRead": 343590,
+                  "cacheWrite": 0,
+                  "uncachedInput": 23260
+                },
+                "cacheReadRate": 0.9365953386942892,
+                "apiCostUSD": null,
+                "approvals": 2,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 2,
+              "passed": true,
+              "elapsedMs": 204908,
+              "usage": {
+                "requests": 36,
+                "observedRequests": 36,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 727702,
+                  "output": 8679,
+                  "cacheRead": 697472,
+                  "cacheWrite": 0,
+                  "uncachedInput": 30230
+                },
+                "tokens": {
+                  "input": 727702,
+                  "output": 8679,
+                  "cacheRead": 697472,
+                  "cacheWrite": 0,
+                  "uncachedInput": 30230
+                },
+                "cacheReadRate": 0.9584582700061289,
+                "apiCostUSD": null,
+                "approvals": 16,
+                "interruptions": 0
+              }
+            },
+            {
+              "task": "pagination",
+              "repetition": 3,
+              "passed": true,
+              "elapsedMs": 236982,
+              "usage": {
+                "requests": 48,
+                "observedRequests": 48,
+                "missingReports": 0,
+                "unknownRequests": 0,
+                "knownTokens": {
+                  "input": 1143892,
+                  "output": 13878,
+                  "cacheRead": 1109719,
+                  "cacheWrite": 0,
+                  "uncachedInput": 34173
+                },
+                "tokens": {
+                  "input": 1143892,
+                  "output": 13878,
+                  "cacheRead": 1109719,
+                  "cacheWrite": 0,
+                  "uncachedInput": 34173
+                },
+                "cacheReadRate": 0.9701256762002007,
+                "apiCostUSD": null,
+                "approvals": 20,
+                "interruptions": 0
+              }
+            }
+          ],
+          "hiddenAcceptancePassed": 9,
+          "verifiedSuccessfulAgentTestRuns": 5,
+          "selfRunCriterion": "At least one persisted agent-dispatched bun test completed with exit 0 and no abort or timeout; evaluator test commands excluded. This does not prove the final edited revision was tested."
+        },
+        "runtime": {
+          "attempts": 21,
+          "successfulEnvironmentReads": 10,
+          "humanReviews": 0
+        }
+      }
+    },
+    "temporaryCredentialSnapshotsRemoved": true
+  },
+  "limitations": [
+    "Preflight candidate still used the unintended Anthropic family template for MiniMax; the controlled rerun corrects that routing.",
+    "Provider caches are uncontrolled. Repeated small synthetic tasks do not establish production quality or per-change causal effects.",
+    "Factual runtime review is agent review, not human annotation.",
+    "Only the configured MiniMax model was called; Codex and Linux remain outside live coverage."
+  ],
+  "localValidation": {
+    "testsPassed": 1491,
+    "testsFailed": 0,
+    "assertions": 6181,
+    "typecheck": "passed",
+    "evalStrictTypecheck": "passed",
+    "build": "passed",
+    "compiledPtySmoke": "passed"
+  },
+  "conclusion": "Both variants passed 8 of 9 scored coding attempts and 9 of 9 hidden acceptance checks. Verified successful agent self-testing fell from 8/9 to 5/9. Candidate runtime environment reads increased from 2/21 to 10/21, but factual and permission-boundary errors remain. No overall reliability, speed, or cost improvement is established."
+}

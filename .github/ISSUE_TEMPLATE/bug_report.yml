@@ -1,0 +1,40 @@
+name: Bug report
+description: Something alfa did wrong, or failed to do
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems (permission bypasses, sandbox escapes, credential exposure) go through
+        [a private advisory](https://github.com/alfa-plus-laboratory/alfa/security/advisories/new), not here.
+  - type: input
+    id: version
+    attributes:
+      label: alfa version
+      description: Output of `alfa --version`
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, terminal, provider/model and permission mode
+      placeholder: macOS 15, Ghostty, anthropic/claude-sonnet-5, auto
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smaller the better. A throwaway repository or a few files is ideal.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Remove API keys and anything private before pasting.
+      render: text

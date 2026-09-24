@@ -1,0 +1,460 @@
+{
+  "date": "2026-09-22",
+  "model": "MINIMAX/MiniMax-M3",
+  "protocol": "anthropic",
+  "permission": "confirm",
+  "cacheCondition": "unspecified",
+  "baselineCommit": "c563e778c3b59de2717721274191df5ff99072d1",
+  "evaluatedCandidate": {
+    "algorithm": "sha256 of sorted relative file path, NUL, bytes, NUL for src/** and package.json",
+    "hash": "146253bb795145a05f185784ebdffa87e84018c85301de137cb663c1b1d79622",
+    "note": "Candidate as evaluated, before any evaluation-discovered follow-up fixes."
+  },
+  "method": {
+    "repetitionsPerScenario": 3,
+    "runtimeScenarios": 7,
+    "codingTasks": 3,
+    "parallelBaselineAndCandidate": true,
+    "humanReviews": 0,
+    "apiCostUSD": null
+  },
+  "limitations": [
+    "Noninteractive confirm rejects approval requests, including environment; the current configured confirm mode was preserved.",
+    "All coding acceptance attempts failed with approval blockers; these runs cannot establish coding capability.",
+    "Environment-first is an attempt-order metric; successful environment reads are zero.",
+    "Provider caches were uncontrolled and baseline/candidate ran concurrently; no causal speed or cost claim.",
+    "MINIMAX uses Anthropic transport; this does not live-validate the opt-in Codex profile or OpenAI cache adapter.",
+    "The candidate combines changes, so results cannot be attributed to one change.",
+    "After these runs, the unavailable-approval message and exact runtime /access syntax received follow-up fixes; they have local regression coverage only."
+  ],
+  "artifactsDirectory": "/tmp/alfa-comparison.JOvRD7",
+  "variants": {
+    "baseline": {
+      "coding": {
+        "attempts": 9,
+        "completed": 0,
+        "usage": {
+          "requests": 53,
+          "observedRequests": 53,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 820297,
+            "output": 23566,
+            "cacheRead": 675498,
+            "cacheWrite": 0,
+            "uncachedInput": 144799
+          },
+          "tokens": {
+            "input": 820297,
+            "output": 23566,
+            "cacheRead": 675498,
+            "cacheWrite": 0,
+            "uncachedInput": 144799
+          },
+          "cacheReadRate": 0.8234797884180973,
+          "apiCostUSD": null,
+          "approvals": 43,
+          "interruptions": 0
+        },
+        "attemptsByTask": [
+          {
+            "task": "csv-quotes",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 10858,
+            "exit": 0,
+            "approvals": 2
+          },
+          {
+            "task": "pagination",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 127725,
+            "exit": 0,
+            "approvals": 6
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 44957,
+            "exit": 0,
+            "approvals": 5
+          },
+          {
+            "task": "csv-quotes",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 6692,
+            "exit": 0,
+            "approvals": 1
+          },
+          {
+            "task": "pagination",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 18675,
+            "exit": 0,
+            "approvals": 6
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 22651,
+            "exit": 0,
+            "approvals": 5
+          },
+          {
+            "task": "csv-quotes",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 73914,
+            "exit": 0,
+            "approvals": 9
+          },
+          {
+            "task": "pagination",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 12702,
+            "exit": 0,
+            "approvals": 3
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 28131,
+            "exit": 0,
+            "approvals": 6
+          }
+        ]
+      },
+      "runtime": {
+        "attempts": 21,
+        "environmentFirst": 1,
+        "environmentCalls": 1,
+        "successfulEnvironmentReads": 0,
+        "usage": {
+          "requests": 24,
+          "observedRequests": 24,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 345130,
+            "output": 20141,
+            "cacheRead": 56681,
+            "cacheWrite": 0,
+            "uncachedInput": 288449
+          },
+          "tokens": {
+            "input": 345130,
+            "output": 20141,
+            "cacheRead": 56681,
+            "cacheWrite": 0,
+            "uncachedInput": 288449
+          },
+          "cacheReadRate": 0.16423086952742444,
+          "apiCostUSD": null,
+          "approvals": 1,
+          "interruptions": 0
+        },
+        "byScenario": [
+          {
+            "scenario": "current-sandbox",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0.3333333333333333,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "approved-temp-denial",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "external-path",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "network-ssh",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "auto-risk-gate",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "broad-root",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "unknown-failure",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          }
+        ]
+      }
+    },
+    "candidate": {
+      "coding": {
+        "attempts": 9,
+        "completed": 0,
+        "usage": {
+          "requests": 39,
+          "observedRequests": 39,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 557872,
+            "output": 8555,
+            "cacheRead": 430525,
+            "cacheWrite": 0,
+            "uncachedInput": 127347
+          },
+          "tokens": {
+            "input": 557872,
+            "output": 8555,
+            "cacheRead": 430525,
+            "cacheWrite": 0,
+            "uncachedInput": 127347
+          },
+          "cacheReadRate": 0.7717272062408581,
+          "apiCostUSD": null,
+          "approvals": 32,
+          "interruptions": 0
+        },
+        "attemptsByTask": [
+          {
+            "task": "csv-quotes",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 39969,
+            "exit": 0,
+            "approvals": 7
+          },
+          {
+            "task": "pagination",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 12084,
+            "exit": 0,
+            "approvals": 4
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 1,
+            "completed": false,
+            "elapsedMs": 33737,
+            "exit": 0,
+            "approvals": 3
+          },
+          {
+            "task": "csv-quotes",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 20254,
+            "exit": 0,
+            "approvals": 3
+          },
+          {
+            "task": "pagination",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 7302,
+            "exit": 0,
+            "approvals": 2
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 2,
+            "completed": false,
+            "elapsedMs": 7353,
+            "exit": 0,
+            "approvals": 2
+          },
+          {
+            "task": "csv-quotes",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 8516,
+            "exit": 0,
+            "approvals": 2
+          },
+          {
+            "task": "pagination",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 12128,
+            "exit": 0,
+            "approvals": 5
+          },
+          {
+            "task": "retry-cancel",
+            "repetition": 3,
+            "completed": false,
+            "elapsedMs": 36220,
+            "exit": 0,
+            "approvals": 4
+          }
+        ]
+      },
+      "runtime": {
+        "attempts": 21,
+        "environmentFirst": 11,
+        "environmentCalls": 12,
+        "successfulEnvironmentReads": 0,
+        "usage": {
+          "requests": 34,
+          "observedRequests": 34,
+          "missingReports": 0,
+          "unknownRequests": 0,
+          "knownTokens": {
+            "input": 485371,
+            "output": 22260,
+            "cacheRead": 194741,
+            "cacheWrite": 0,
+            "uncachedInput": 290630
+          },
+          "tokens": {
+            "input": 485371,
+            "output": 22260,
+            "cacheRead": 194741,
+            "cacheWrite": 0,
+            "uncachedInput": 290630
+          },
+          "cacheReadRate": 0.40122092172791535,
+          "apiCostUSD": null,
+          "approvals": 12,
+          "interruptions": 0
+        },
+        "byScenario": [
+          {
+            "scenario": "current-sandbox",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 1,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "approved-temp-denial",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0.6666666666666666,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "external-path",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 1,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "network-ssh",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0.6666666666666666,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "auto-risk-gate",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0.3333333333333333,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "broad-root",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          },
+          {
+            "scenario": "unknown-failure",
+            "model": "MINIMAX/MiniMax-M3",
+            "attempts": 3,
+            "environmentFirstRate": 0,
+            "reviewedAttempts": 0,
+            "factualErrors": null,
+            "unsupportedAttributions": null,
+            "unnecessaryDowngrades": null
+          }
+        ]
+      }
+    }
+  },
+  "finalLocalValidation": {
+    "tests": {
+      "passed": 1480,
+      "failed": 0,
+      "assertions": 6090,
+      "files": 77
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "compiledPtySmoke": "passed",
+    "sourceFingerprint": "f1909a7488c575fc39854013bc014ee04612b4565794c7121485c4d51db34876",
+    "testLog": "/tmp/alfa-final-verification.log",
+    "ptyTranscript": "/var/folders/cf/66jcm4f173sdmtzg1gp94xm80000gn/T/alfa-terminal-gplxa6gw/transcript.txt",
+    "liveReevaluationAfterFollowupFixes": false
+  }
+}

@@ -1,0 +1,126 @@
+# Runs on every push and every PR.
+#
+# ── Why a separate workflow ──
+# release.yml also runs typecheck + test, but only fires when a tag is pushed — finding
+# out it's red at that point is a whole round too late. The public repo's first outside PR
+# needs this even more: without it, review has to judge by hand "will this change turn the
+# tests red".
+#
+# ── The bun version is pinned to the same number as release.yml ──
+# If the two drift apart, CI is green while release is red (or worse: the other way
+# round), and that kind of failure has no clue at all pointing to "the two workflows used
+# different runtimes". Changing the version means changing both places.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # The public image label moves to 26.04 in October 2026. Pin the build floor so a
+    # runner migration cannot change compilers and system libraries between commits.
+    #
+    # macOS is in the matrix because it is the platform the OS sandbox is actually used on
+    # (Seatbelt ships with the system, so the kernel-level sandbox tests run there instead
+    # of being skipped). Ubuntu alone left the primary platform's code paths unexercised.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pinned; for why, see the ★ note in release.yml
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      # ★ Three architecture boundaries. Nothing they guard would ever turn a test red —
+      #   break one and everything still runs fine, the design just gets quietly taken
+      #   apart, and that kind of damage only surfaces **months later**, in some other
+      #   form. The comment above each check says what it guards against.
+      #
+      #   Linux only: the guards use GNU grep -P, which BSD grep on macOS lacks, and what
+      #   they check doesn't depend on the platform.
+      - name: Architecture guards
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          fail=0
+
+          # The LLM SDK may only live in src/llm/. Once the tool and prompt layers import
+          # it directly, "switch to another provider" goes from editing one file to
+          # editing a whole swath
+          if grep -rnE 'from "(ai|@ai-sdk/)' src/tool src/agent src/prompt src/cli; then
+            echo "::error::src/{tool,agent,prompt,cli} must not import the LLM SDK — it belongs in src/llm/" >&2
+            fail=1
+          fi
+
+          # Colors come only from theme.ts. Imported all over the place, the theme stops
+          # being something you can switch
+          if grep -rn 'from "picocolors"' src | grep -v '^src/cli/theme.ts:'; then
+            echo "::error::picocolors may only be imported by src/cli/theme.ts" >&2
+            fail=1
+          fi
+
+          # Raw control characters are **invisible** in diffs and grep — only written as
+          # \u001b can they be seen, and invisible characters are the kind nobody notices
+          # when they get broken.
+          #
+          # ★ Scan only **tracked** files. Scanning bin/ directly hits the
+          #   ninety-something MB binary from `bun run build` (full of control characters,
+          #   naturally), so this guard is red on any machine that has built locally — a
+          #   check that's always red is as good as no check
+          if git ls-files -z src script test bin | xargs -0 grep -lP '[\x00-\x08\x0b\x0c\x0e-\x1f]'; then
+            echo "::error::raw control characters in source — write them as \\u001b escapes" >&2
+            fail=1
+          fi
+
+          exit "$fail"
+
+  # The Linux sandbox backend (bubblewrap) has no other CI coverage: without bwrap the
+  # kernel-level sandbox tests skip themselves. Two runs, because Linux users meet two
+  # situations. Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, so
+  # the first run checks that an installed-but-blocked bwrap is reported as unavailable
+  # with the reason (the first CI run of this job found alfa calling it available and
+  # failing every command with "setting up uid map"). The second run lifts the restriction
+  # and checks that the sandbox actually isolates. Informational until the second run has
+  # been green for a while.
+  sandbox-linux:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Sandbox tests, user namespaces restricted (Ubuntu default)
+        run: bun test test/sandbox.test.ts test/auto-access.test.ts
+
+      - name: Sandbox tests, user namespaces allowed
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bun test test/sandbox.test.ts test/auto-access.test.ts
