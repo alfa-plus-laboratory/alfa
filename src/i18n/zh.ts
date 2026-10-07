@@ -228,6 +228,8 @@ export const zh: Catalog = {
   agentflowBanner: (running: number, total: number) => `agentflow 开着 —— 最多 ${total} 个子 agent,同时 ${running} 个`,
 
   askSomethingElse: "其他（自行输入）…",
+
+  askRecommended: "推荐",
   askPlainHintSingle: "按 1-9 选择 · o 自行输入 · ⏎ = 1 · esc 跳过",
   askPlainHintMultiple: "按 1-9 多选 · o 自行输入 · ⏎ 确定 · esc 跳过",
   askPlainHintBack: "← 回上一题",

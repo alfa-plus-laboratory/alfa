@@ -324,6 +324,7 @@ export const en = {
 
   // ─────────────────────────────────────────── It asks you something (see tool/ask.ts)
   askSomethingElse: "something else…",
+  askRecommended: "recommended",
   askPlainHintSingle: "press 1-9 to pick · o to type your own · ⏎ = 1 · esc dismiss",
   askPlainHintMultiple: "press 1-9 to toggle · o to type your own · ⏎ confirm · esc dismiss",
   /** Only shown when there is an earlier question to go back to. See canBack in cli/ask.ts */

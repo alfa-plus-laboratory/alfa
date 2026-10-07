@@ -74,6 +74,10 @@ const Parameters = z.object({
                 .string()
                 .optional()
                 .describe("One line: what picking this means, or what it costs. Omit it rather than padding."),
+              recommended: z
+                .boolean()
+                .optional()
+                .describe("True on the one option you would pick yourself. At most one; it is shown first, marked, and Enter picks it."),
             }),
           )
           .describe(`Between 2 and ${MAX_OPTIONS} options, best first.`),
@@ -107,6 +111,7 @@ Usage rules:
 - Batch only questions that are INDEPENDENT. If the answer to one decides whether another matters — or changes its options — ask that one alone and come back with the rest. Answering a question that turned out to be moot is worse than a second call.
 - Order them the way you would say them out loud: the most consequential first.
 - ${MAX_OPTIONS} options per question at most, and each must be a real answer, not a placeholder like "other" — the user always has a free-text choice of their own.
+- If you would pick one yourself, mark it \`recommended\` and say why in its description: a person deciding fast wants your call, not only the menu. Skip it when you honestly have no preference.
 - The user may type something else entirely, or dismiss a question. Both come back to you as such: a typed answer outranks the options you offered, and a dismissed question means move on with your best judgement, not ask again.
 - In a non-interactive run (piped input, -p) there is nobody to answer. You will be told so; decide yourself and state the assumption you made.`
 
@@ -277,9 +282,17 @@ function unavailable(questions: string[]): {
  * they misread. Empty ones are simply dropped, no error — a wasted tool call costs more
  * than "one fewer obviously-filler option".
  */
-function normalize(options: readonly { label: string; description?: string }[]): QuestionOption[] {
+/**
+ * ★ The recommended option is moved to the front, and only the first one marked counts.
+ *   The plain path's ⏎ means option 1 and the card's cursor starts on row 0; with the
+ *   recommendation always there, both pick it without carrying a second rule. Claude
+ *   Code asks the model to put it first; here the order is enforced, since a model that
+ *   marks the third option would otherwise leave ⏎ on a different answer than the badge.
+ */
+function normalize(options: readonly { label: string; description?: string; recommended?: boolean }[]): QuestionOption[] {
   const out: QuestionOption[] = []
   const seen = new Set<string>()
+  let recommended = false
   for (const option of options) {
     const label = clamp(option.label ?? "", MAX_LABEL)
     if (label.length === 0) continue
@@ -287,7 +300,12 @@ function normalize(options: readonly { label: string; description?: string }[]):
     if (seen.has(key)) continue
     seen.add(key)
     const description = clamp(option.description ?? "", MAX_DESCRIPTION)
-    out.push(description.length > 0 ? { label, description } : { label })
+    const pick = option.recommended === true && !recommended
+    const entry: QuestionOption = { label, ...(description.length > 0 ? { description } : {}), ...(pick ? { recommended: true } : {}) }
+    if (pick) {
+      recommended = true
+      out.unshift(entry)
+    } else out.push(entry)
     if (out.length >= MAX_OPTIONS) break
   }
   return out

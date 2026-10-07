@@ -205,8 +205,9 @@ export class AskCard {
     question.options.forEach((option, index) => {
       const box = question.multiple ? (this.picked.has(index) ? theme.green("[✓] ") : theme.muted("[ ] ")) : ""
       const active = this.row === index
+      const badge = option.recommended ? " " + theme.green(`(${t.askRecommended})`) : ""
       row(index, room => [
-        ...wrapToWidth(active ? theme.accent(option.label) : option.label, room),
+        ...wrapToWidth((active ? theme.accent(option.label) : option.label) + badge, room),
         ...(option.description ? wrapToWidth(option.description, room).map(line => theme.muted(line)) : []),
       ], `${index + 1}. ${box}`)
     })
@@ -325,7 +326,7 @@ export async function askInPlain(question: Question, deps: AskDeps = {}): Promis
 export function renderQuestion(question: Question): string {
   const lines: string[] = ["", `  ${titleLine(question)}`, ""]
   question.options.forEach((option, index) => {
-    lines.push(`  ${theme.cyan(`${index + 1}`)} ${option.label}`)
+    lines.push(`  ${theme.cyan(`${index + 1}`)} ${option.label}${option.recommended ? " " + theme.green(`(${t.askRecommended})`) : ""}`)
     if (option.description) lines.push(`    ${theme.dim(option.description)}`)
   })
   lines.push(`  ${theme.cyan("o")} ${theme.dim(t.askSomethingElse)}`)

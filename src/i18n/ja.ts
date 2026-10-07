@@ -230,6 +230,8 @@ export const ja: Catalog = {
   agentflowBanner: (running: number, total: number) => `agentflow オン — 最大 ${total} 件、同時に ${running} 件`,
 
   askSomethingElse: "どれも違う。自分で書く…",
+
+  askRecommended: "おすすめ",
   askPlainHintSingle: "1-9 で選択 · o で自由入力 · ⏎ = 1 · esc 答えない",
   askPlainHintMultiple: "1-9 で選択切替 · o で自由入力 · ⏎ 決定 · esc 答えない",
   askPlainHintBack: "← 前の質問へ",

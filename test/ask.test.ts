@@ -78,6 +78,31 @@ describe("the ask tool", () => {
     expect(asked?.options.map((option) => option.label)).toEqual(["Postgres", "SQLite"])
   })
 
+  // ★ ⏎ on the plain path means option 1 and the card starts on row 0; the badge, the
+  //   cursor and ⏎ only agree if the recommendation is first
+  test("★ the recommended option is moved first, and only the first one marked counts", async () => {
+    let asked: Question | undefined
+    await AskTool.execute(
+      {
+        questions: [{
+          question: "Which database?",
+          options: [{ label: "Postgres" }, { label: "SQLite", recommended: true }, { label: "MySQL", recommended: true }],
+        }],
+      },
+      context({ inquire: async (input) => { asked = input; return { kind: "cancelled" } } }),
+    )
+    expect(asked?.options).toEqual([{ label: "SQLite", recommended: true }, { label: "Postgres" }, { label: "MySQL" }])
+  })
+
+  test("no recommendation keeps the model's order — it is optional", async () => {
+    let asked: Question | undefined
+    await AskTool.execute(
+      { questions: [{ question: "Which?", options: [{ label: "B" }, { label: "A" }] }] },
+      context({ inquire: async (input) => { asked = input; return { kind: "cancelled" } } }),
+    )
+    expect(asked?.options).toEqual([{ label: "B" }, { label: "A" }])
+  })
+
   test("a pick returns the **option text** verbatim to the model, not an index", async () => {
     const patches: Record<string, unknown>[] = []
     const result = await AskTool.execute(
@@ -134,6 +159,13 @@ describe("the live card", () => {
     return answer
   }
   const shown = (card: AskCard, width = 60, height = 30) => card.render(width, height).lines.map(stripAnsi)
+
+  test("★ a recommended option is marked on the card, and ⏎ right away picks it, label unchanged", () => {
+    const card = new AskCard({ question: "Which database?", multiple: false, options: [{ label: "SQLite", recommended: true }, { label: "Postgres" }] })
+    expect(shown(card).some(line => line.includes("SQLite (recommended)"))).toBe(true)
+    expect(shown(card).some(line => line.includes("Postgres (recommended)"))).toBe(false)
+    expect(press(card, "enter")).toEqual({ kind: "picked", choices: ["SQLite"] })
+  })
 
   test("★ ↓ then ⏎ picks what the cursor is on — ⏎ used to be able to mean only '1'", () => {
     const card = new AskCard(question())
