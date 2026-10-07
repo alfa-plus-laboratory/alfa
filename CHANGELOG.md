@@ -2,6 +2,19 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.16.1
+
+**The status rows sit under the input box, and the speed meter stops sinking while a
+tool runs.**
+
+- The plan, working subagents and background jobs moved from above the running line to
+  under the input box, next to the footer. Each row starts with a label (plan / agents /
+  jobs) in one column, and agent names are padded so what they are doing lines up.
+- Up to three working subagents are listed one per row; the summary strip only appears
+  past three. Three agents no longer fold into one name and "+2 more".
+- The tok/s figure no longer counts a tool's run time as the model's writing time.
+  During a long `bash` it used to drop steadily; it now holds the step's real rate.
+
 ## 0.16.0
 
 **Agents talk to each other while they work: the main agent and its subagents, and alfa
