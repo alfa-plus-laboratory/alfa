@@ -348,16 +348,20 @@ describe("chooseProvider", () => {
     }
   })
 
-  test("configured keys win, Google first", () => {
-    only({ GOOGLE_CSE_KEY: "k", GOOGLE_CSE_CX: "c", BRAVE_API_KEY: "b", TAVILY_API_KEY: "t" })
-    expect(chooseProvider().provider).toBe("google")
+  test("configured keys win, Brave before Tavily", () => {
+    only({ BRAVE_API_KEY: "b", TAVILY_API_KEY: "t" })
+    expect(chooseProvider().provider).toBe("brave")
+    only({ TAVILY_API_KEY: "t" })
+    expect(chooseProvider().provider).toBe("tavily")
   })
 
-  test("★ half a Google config doesn't count — without both key and cx no request can be sent", () => {
-    only({ GOOGLE_CSE_KEY: "k", BRAVE_API_KEY: "b" })
-    expect(chooseProvider().provider).toBe("brave")
-    only({ GOOGLE_CSE_CX: "c" })
+  // ★ Google's Custom Search API is closed to new customers and shuts down on
+  //   2027-01-01; a machine that still has the keys must not pick a dead backend
+  test("★ Google keys left in the environment are ignored — that API is being shut down", () => {
+    only({ GOOGLE_CSE_KEY: "k", GOOGLE_CSE_CX: "c" })
     expect(chooseProvider().provider).toBe("duckduckgo")
+    only({ GOOGLE_CSE_KEY: "k", GOOGLE_CSE_CX: "c", BRAVE_API_KEY: "b" })
+    expect(chooseProvider().provider).toBe("brave")
   })
 
   test("with nothing configured, falls back to the keyless one", () => {
@@ -368,10 +372,11 @@ describe("chooseProvider", () => {
   test("★ the fallback hint says how to upgrade — what the user sees is 'rate-limited again'", () => {
     only({})
     const hint = providerHint()
-    expect(hint).toContain("GOOGLE_CSE_KEY")
+    expect(hint).toContain("BRAVE_API_KEY")
+    expect(hint).not.toContain("GOOGLE")
     expect(hint).toContain("rate-limit")
-    only({ GOOGLE_CSE_KEY: "k", GOOGLE_CSE_CX: "c" })
-    expect(providerHint()).toBe("Searching with google.")
+    only({ BRAVE_API_KEY: "b" })
+    expect(providerHint()).toBe("Searching with brave.")
   })
 })
 

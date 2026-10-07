@@ -1609,18 +1609,15 @@ configured:
 
 | Environment variable | Backend | |
 |---|---|---|
-| `GOOGLE_CSE_KEY` + `GOOGLE_CSE_CX` | Google Programmable Search | Recommended. 100 queries/day free, **no card needed** |
-| `BRAVE_API_KEY` | Brave Search API | Bigger quota, but **even the free tier needs a credit card to sign up** |
+| `BRAVE_API_KEY` | Brave Search API | Gives publish dates; **even the free tier needs a credit card to sign up** |
 | `TAVILY_API_KEY` | Tavily | |
 | (nothing configured) | DuckDuckGo's unauthenticated endpoint | Fallback, the only one that needs no key. **Rate-limits** |
 
-Google comes first because it's the only one of these that gets you a proper API
-**without handing over a credit card**. Attaching a card for a command-line tool puts most
-people off — and an option that puts people off might as well not exist, which is exactly
-why the fallback gets used until it's rate-limited.
-
-The variable names are the two from Google Programmable Search's own docs, not a set of
-our own — a machine already set up for it elsewhere works here out of the box.
+Google Programmable Search (`GOOGLE_CSE_KEY` + `GOOGLE_CSE_CX`) used to head this table,
+as the one real API with no credit card. It was removed: Google closed the Custom Search
+JSON API to new customers in 2025 and shuts it down on 2027-01-01, and engines created
+since 2026-01-20 can only search listed sites. Keeping it meant recommending a key nobody
+could get, then breaking for those who had one. Keys left in the environment are ignored.
 
 The fallback works out of the box, but the way it rate-limits is by **answering with a
 CAPTCHA page**, so "found nothing" and "wasn't allowed to search" look exactly alike. So
@@ -1629,12 +1626,12 @@ model, which will conclude from it that "this thing doesn't exist". The output s
 one it is, and carries along the line "configure a key and this goes away" — all the user
 sees is "it says it can't find anything, again".
 
-Results carry a **publication date** (when Google / Brave can provide one). On
+Results carry a **publication date** (when Brave can provide one). On
 time-sensitive questions this is worth more than anything: "what's been going on with X
 lately", "is this library still maintained", "what's the latest version now" — a result
 from 2019 and one from last week differ by orders of magnitude, and nothing in the title
-or snippet shows that difference. The Google one also supports `page` pagination and
-operators like `site:` / `intitle:`.
+or snippet shows that difference. There is no `page` parameter: Google was the only
+backend that paged, and on the others it returned page one again without saying so.
 
 `webfetch` squeezes HTML down to markdown-ish body text: it prefers `<main>` / `<article>`
 (half the bytes of a docs site are navigation and footer, which are worth nothing for "how
