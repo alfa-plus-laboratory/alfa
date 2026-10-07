@@ -574,14 +574,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   })
   const emitter = new Emitter<UIEvent>()
   emitter.on((event) => renderer.handle(event))
-  // What the main agent is doing, for the running line. Only the main emitter feeds it:
-  // subagents have their own streams and their own row (cli/pinned.ts)
-  const activity = new Activity()
-  emitter.on((event) => activity.handle(event))
   /**
    * The main agent's current checklist, for the pinned plan row. Fed by its own todo
    * calls; on session switch and compaction it is recomputed by latestPlan so it always
    * equals the list the model is actually sent.
+   *
+   * ⚠ Registered before Activity's listener. Activity repaints synchronously when the todo
+   *   call ends (with the animation off, nothing else repaints until the next event);
+   *   registered after it, that frame still showed the old progress and the new one
+   *   waited for whatever the model did next.
    */
   const plan: { items: TodoItem[] } = { items: [] }
   emitter.on((event) => {
@@ -590,6 +591,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const items = parseTodos(event.part.state.metadata["todos"])
     if (items.length > 0) plan.items = items
   })
+  // What the main agent is doing, for the running line. Only the main emitter feeds it:
+  // subagents have their own streams and their own row (cli/pinned.ts)
+  const activity = new Activity()
+  emitter.on((event) => activity.handle(event))
   /**
    * Something the pinned rows show changed outside the main event stream (a subagent's
    * step, a background process starting or dying). The interactive shell installs the
