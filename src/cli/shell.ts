@@ -342,7 +342,10 @@ export class Shell {
       this.completionText = this.deps.editor.text; this.completionIndex = 0; this.completionHidden = false
     }
     const choices = this.completionHidden ? undefined : complete(this.deps.editor.text, this.deps.editor.cursor, this.deps.files)
+    // A blank row above the running line: right under the streamed reply it read as the
+    // reply's last line. Dropped on a short terminal, where the box needs the row
     const running = this.runningLine(width)
+    if (running.length > 0 && region.rows >= 12) running.unshift("")
     // Pinned rows get what a short terminal can spare after the input box's minimum. Six
     // is a plan, three listed subagents, a jobs row and one to spare (see cli/pinned.ts)
     const pinnedMax = region.rows >= 30 ? 6 : region.rows >= 24 ? 5 : region.rows >= 18 ? 3 : region.rows >= 14 ? 1 : 0

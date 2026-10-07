@@ -253,6 +253,20 @@ describe("running line", () => {
     } finally { shell.stop(); term.region.close(); keyboard.close() }
   })
 
+  // Right under the streamed reply, the running line read as the reply's last line
+  test("a blank row separates the running line from the output above it", () => {
+    const keyboard = fakeKeyboard(), frames: string[][] = [], activity = new Activity()
+    const region = { active: true, width: 80, rows: 30, set: (lines: string[]) => frames.push(lines), clear() {} } as unknown as LiveRegion
+    const shell = new Shell({ keyboard, region, editor: new Editor([]), activity, animate: () => false, onSubmit() {}, onCancel() {}, onExit() {} })
+    shell.start()
+    try {
+      shell.setBusy(true)
+      const lines = frames.at(-1)!.map(stripAnsi)
+      expect(lines[0]).toBe("")
+      expect(lines[1]).toContain("working")
+    } finally { shell.stop(); keyboard.close() }
+  })
+
   test("animation off: a still mark and no clock that would stop moving", () => {
     const keyboard = fakeKeyboard(), term = terminal(), activity = new Activity()
     const shell = new Shell({ keyboard, region: term.region, editor: new Editor([]), activity, animate: () => false, onSubmit() {}, onCancel() {}, onExit() {} })
