@@ -36,7 +36,7 @@ const say: LLMEvent[] = [
 const tool = (id: string): ToolDef<any> => ({ id, description: id, parameters: z.object({}), execute: async () => ({ output: "", metadata: { truncated: false } }) })
 /** Already sorted, as the registry hands it out. The codex profile swaps edit/write for apply_patch */
 const toolsFor = (model?: ModelInfo) =>
-  (model?.promptProfile === "openai-codex" ? ["apply_patch", "bash", "glob", "grep", "read"] : ["bash", "edit", "glob", "grep", "read", "write"]).map(tool)
+  (model?.promptProfile === "openai-codex" ? ["apply_patch", "bash", "glob", "grep", "message", "read"] : ["bash", "edit", "glob", "grep", "message", "read", "write"]).map(tool)
 
 function harness(options: { effort?: () => ReasoningEffort | undefined; resolveModel?: boolean; failWith?: string; claimOnExit?: boolean } = {}) {
   __resetNamesForTest()
@@ -113,14 +113,23 @@ describe("tools", () => {
     await settled(h.agents, job.id)
     // Registry order, not the order they were named in: the tool list is the earliest
     // cache prefix, and two scouts naming the same tools differently must share it
-    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["glob", "grep", "read"])
+    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["glob", "grep", "message", "read"])
+  })
+
+  // ★ Three read-only scouts were asked to send a line back and couldn't: "read-only" cut
+  //   the channel with the rest. message touches nothing, so a tools list never removes it
+  test("★ a narrowed subagent keeps message — its line back is not a capability to grant", async () => {
+    const h = harness()
+    const job = await h.agents.start({ name: "scout", prompt: "look", tools: ["read"] })
+    await settled(h.agents, job.id)
+    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["message", "read"])
   })
 
   test("without tools it gets everything it had before", async () => {
     const h = harness()
     const job = await h.agents.start({ name: "worker", prompt: "fix it" })
     await settled(h.agents, job.id)
-    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["bash", "edit", "glob", "grep", "read", "write"])
+    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["bash", "edit", "glob", "grep", "message", "read", "write"])
   })
 
   /**
@@ -146,7 +155,7 @@ describe("tools", () => {
     await expect(h.agents.start({ name: "a", prompt: "x", tools: ["apply_patch"] })).rejects.toThrow(/"apply_patch"/)
     const job = await h.agents.start({ name: "b", prompt: "x", model: "codex/gpt", tools: ["apply_patch", "read"] })
     await settled(h.agents, job.id)
-    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["apply_patch", "read"])
+    expect(h.requests[0]!.tools.map((one) => one.id)).toEqual(["apply_patch", "message", "read"])
   })
 })
 

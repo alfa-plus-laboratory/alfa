@@ -127,6 +127,12 @@ export interface QuestionOption {
   label: string
   /** One more line: why pick it, what it costs. If there's nothing to say, don't invent it */
   description?: string
+  /**
+   * The model's own pick. At most one per question, and always first (see normalize in
+   * tool/ask.ts), so ⏎ and the card's starting cursor land on it without either needing
+   * to know about it
+   */
+  recommended?: boolean
 }
 
 /**

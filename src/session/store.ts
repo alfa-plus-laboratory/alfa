@@ -179,10 +179,14 @@ export class Store {
     this.file = file
     if (file !== ":memory:") ensureDirSync(dataDir())
     this.db = new Database(file, { create: true, strict: true })
+    // ⚠ busy_timeout first. Switching to WAL takes a lock; set after it, two alfa
+    //   processes opening the database at the same moment (two terminals started
+    //   together, or both polling the mailbox, see tool/message.ts) made the second one
+    //   fail with "database is locked" instead of waiting its turn
+    this.db.exec("PRAGMA busy_timeout = 5000")
     this.db.exec("PRAGMA journal_mode = WAL")
     this.db.exec("PRAGMA synchronous = NORMAL")
     this.db.exec("PRAGMA foreign_keys = ON")
-    this.db.exec("PRAGMA busy_timeout = 5000")
     this.db.exec(DDL)
     this.migrate()
   }

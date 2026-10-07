@@ -96,6 +96,18 @@ import { isSettled, Loop } from "./loop.ts"
  */
 export { MAX_AGENT_JOBS } from "./flow.ts"
 
+/**
+ * Tools a task's `tools` list can't take away.
+ *
+ * ★ `tools` limits what a subagent can do to the world; `message` does nothing to it — it
+ *   is the line back to the agent that dispatched it. A live run asked three read-only
+ *   scouts (`["read", "glob", "grep"]`) to each send it a line, and none could: "read-only"
+ *   was read as "only these names", the channel went with the rest, and the asks ended
+ *   up stapled to their reports. Keeping it out of the model's hands is cheaper than
+ *   every brief remembering it.
+ */
+const ALWAYS_GRANTED = new Set(["message"])
+
 /** Once a dependency finishes, max chars of its report spliced in for the next worker */
 const HANDOFF_CHARS = 8_000
 
@@ -596,7 +608,7 @@ export class SubagentJobs implements AgentJobs {
       stream: this.deps.stream,
       // Filtered, never reordered — see the ⚠ in the file header
       tools: tools
-        ? () => this.deps.tools(model?.info).filter((tool) => tools.includes(tool.id))
+        ? () => this.deps.tools(model?.info).filter((tool) => tools.includes(tool.id) || ALWAYS_GRANTED.has(tool.id))
         : () => this.deps.tools(model?.info),
       system: () => this.deps.system(model),
       makeToolContext: (call) => this.deps.makeToolContext({ id, sessionID }, call),
