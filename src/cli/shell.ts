@@ -400,7 +400,7 @@ export class Shell {
     const tail = [ticking ? clock(activity.elapsed(now)) : "", t.interruptHint].filter(Boolean).join(" · ")
     // The mark is always three columns and coloured by mark() itself
     const head = "  " + mark(phase, ticking ? this.frame : 0) + " " +
-      theme.accent(phaseLabel(phase, now, this.previewLabel)) + theme.muted(` · ${tail}`)
+      theme.accent(phaseLabel(phase, now, this.previewLabel, activity.phaseElapsed(now))) + theme.muted(` · ${tail}`)
     const lines = [truncateToWidth(head, width)]
     if (!tall) return lines
     // A tool streaming output owns the preview; otherwise the thinking tail, if shown
@@ -441,9 +441,9 @@ function thoughtRows(text: string, width: number, rows: number): string[] {
   return shown
 }
 
-function phaseLabel(phase: Phase, now: number, previewLabel: string): string {
+function phaseLabel(phase: Phase, now: number, previewLabel: string, phaseFor = 0): string {
   switch (phase.kind) {
-    case "thinking": return uiText("thinking", "思考中", "思考中")
+    case "thinking": return thinkingLabel(phaseFor)
     case "writing": return uiText("writing", "输出中", "出力中")
     case "tool": return phase.name
     case "retrying": {
@@ -452,4 +452,20 @@ function phaseLabel(phase: Phase, now: number, previewLabel: string): string {
     }
     case "working": return previewLabel || t.working
   }
+}
+
+/**
+ * The word for a think, by how long it has gone on. A label that stays "thinking" for
+ * three minutes reads the same as one stuck there; a word that moves on says time is
+ * passing and the model is still at it.
+ *
+ * ⚠ Picked by elapsed time, never at random: a random pick would change the word on
+ *   every frame of the animation, and the same moment must always draw the same line.
+ */
+export function thinkingLabel(ms: number): string {
+  if (ms >= 180_000) return uiText("working through it", "还在推敲", "まだ検討中")
+  if (ms >= 90_000) return uiText("deep in thought", "深度思考中", "じっくり思考中")
+  if (ms >= 45_000) return uiText("thinking it through", "仔细琢磨中", "考え抜いています")
+  if (ms >= 20_000) return uiText("still thinking", "还在想", "まだ考え中")
+  return uiText("thinking", "思考中", "思考中")
 }

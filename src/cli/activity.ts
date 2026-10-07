@@ -65,6 +65,8 @@ export class Activity {
   private started: number | undefined
   private steps = 0
   private phase: Phase = { kind: "working" }
+  /** When the current kind of phase began; see phaseElapsed */
+  private phaseSince = 0
   private tools = new Map<string, string>()
   private thought: { id: string; text: string } | undefined
   /** When this step's first output streamed; undefined until it has */
@@ -83,6 +85,7 @@ export class Activity {
     this.started = now
     this.steps = 0
     this.phase = { kind: "working" }
+    this.phaseSince = now
     this.tools.clear()
     this.thought = undefined
     this.resetStep()
@@ -105,6 +108,15 @@ export class Activity {
 
   elapsed(now = Date.now()): number {
     return this.started === undefined ? 0 : Math.max(0, now - this.started)
+  }
+
+  /**
+   * How long the current kind of phase has lasted — a new reasoning block after a tool
+   * call starts again from zero, more deltas of the same one don't. The running line
+   * words a long think differently (see thinkingLabel in cli/shell.ts).
+   */
+  phaseElapsed(now = Date.now()): number {
+    return Math.max(0, now - this.phaseSince)
   }
 
   current(now = Date.now()): Phase {
@@ -144,7 +156,7 @@ export class Activity {
         if (part.type === "reasoning") {
           this.thought = { id: part.id, text: "" }
           this.sawReasoning = true
-          this.setPhase({ kind: "thinking" })
+          this.setPhase({ kind: "thinking" }, now)
         }
         return
       }
@@ -157,20 +169,20 @@ export class Activity {
           this.sawReasoning = true
           const text = fold((this.thought?.id === part.id ? this.thought.text : "") + event.delta)
           this.thought = { id: part.id, text: text.length > THOUGHT_TAIL ? text.slice(-THOUGHT_TAIL) : text }
-          if (this.phase.kind !== "thinking") this.setPhase({ kind: "thinking" })
+          if (this.phase.kind !== "thinking") this.setPhase({ kind: "thinking" }, now)
           else this.changed()
         } else if (this.phase.kind !== "writing") {
           this.thought = undefined
-          this.setPhase({ kind: "writing" })
+          this.setPhase({ kind: "writing" }, now)
         }
         return
       }
       case "part.end":
         if (event.part.type === "reasoning" && this.thought?.id === event.part.id) {
           this.thought = undefined
-          this.setPhase(this.toolPhase() ?? { kind: "working" })
+          this.setPhase(this.toolPhase() ?? { kind: "working" }, now)
         } else if (event.part.type === "text" && this.phase.kind === "writing") {
-          this.setPhase(this.toolPhase() ?? { kind: "working" })
+          this.setPhase(this.toolPhase() ?? { kind: "working" }, now)
         }
         return
       case "tool.state": {
@@ -181,9 +193,9 @@ export class Activity {
           this.toolRan = true
           this.tools.set(part.callID, part.tool)
           this.thought = undefined
-          this.setPhase({ kind: "tool", name: part.tool })
+          this.setPhase({ kind: "tool", name: part.tool }, now)
         } else if (part.state.status !== "pending" && this.tools.delete(part.callID)) {
-          this.setPhase(this.toolPhase() ?? { kind: "working" })
+          this.setPhase(this.toolPhase() ?? { kind: "working" }, now)
         }
         return
       }
@@ -200,7 +212,7 @@ export class Activity {
         return
       }
       case "retry":
-        this.setPhase({ kind: "retrying", until: now + event.delayMs })
+        this.setPhase({ kind: "retrying", until: now + event.delayMs }, now)
         return
       default:
         return
@@ -231,7 +243,8 @@ export class Activity {
     this.sawReasoning = false
   }
 
-  private setPhase(phase: Phase): void {
+  private setPhase(phase: Phase, now = Date.now()): void {
+    if (phase.kind !== this.phase.kind) this.phaseSince = now
     this.phase = phase
     this.changed()
   }

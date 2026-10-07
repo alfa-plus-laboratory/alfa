@@ -20,7 +20,7 @@ import { Renderer } from "../src/cli/render.ts"
 import { Editor } from "../src/cli/editor.ts"
 import { Keyboard } from "../src/cli/keyboard.ts"
 import { LiveRegion } from "../src/cli/live.ts"
-import { Shell } from "../src/cli/shell.ts"
+import { Shell, thinkingLabel } from "../src/cli/shell.ts"
 import { setColorEnabled } from "../src/cli/theme.ts"
 import { displayWidth, stripAnsi } from "../src/cli/width.ts"
 import { setInterfaceLanguage, LANGUAGES } from "../src/i18n/index.ts"
@@ -94,6 +94,32 @@ describe("activity: the phase follows what streamed", () => {
     a.handle({ type: "step.finish", part: stepFinish(10) }, 3000)
     expect(a.end(84_000)).toEqual({ elapsedMs: 83_000, steps: 2 })
     expect(a.end()).toBeUndefined()
+  })
+})
+
+describe("a long think is worded differently", () => {
+  // ⚠ By elapsed time, never random: the animation repaints several times a second
+  test("the word moves on as the think goes on, and the same moment always gives the same word", () => {
+    expect(thinkingLabel(0)).toBe("thinking")
+    expect(thinkingLabel(19_999)).toBe("thinking")
+    expect(thinkingLabel(20_000)).toBe("still thinking")
+    expect(thinkingLabel(45_000)).toBe("thinking it through")
+    expect(thinkingLabel(90_000)).toBe("deep in thought")
+    expect(thinkingLabel(180_000)).toBe("working through it")
+    expect(thinkingLabel(30_000)).toBe(thinkingLabel(30_000))
+  })
+
+  test("★ the clock is this think's, not the turn's: a tool call in between starts it over", () => {
+    const a = new Activity()
+    a.begin(0)
+    a.handle({ type: "part.start", part: reasoning("r1") }, 1_000)
+    a.handle({ type: "part.delta", part: reasoning("r1"), delta: "more" }, 30_000)
+    // more of the same think doesn't reset it
+    expect(a.phaseElapsed(31_000)).toBe(30_000)
+    a.handle({ type: "tool.state", part: tool("c", "bash", "running") }, 40_000)
+    a.handle({ type: "tool.state", part: tool("c", "bash", "completed") }, 50_000)
+    a.handle({ type: "part.start", part: reasoning("r2") }, 60_000)
+    expect(a.phaseElapsed(65_000)).toBe(5_000)
   })
 })
 
