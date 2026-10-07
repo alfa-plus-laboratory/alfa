@@ -5,6 +5,9 @@
  * to the scheduler it exercises.
  */
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Store } from "../src/session/store.ts"
 import { MessageTool, type Messenger } from "../src/tool/message.ts"
 import { envelope } from "../src/tool/untrusted.ts"
@@ -92,6 +95,31 @@ describe("the mailbox between sessions", () => {
     expect(store.peers(-1)).toEqual([])
     expect(store.peers(60_000)).toEqual([])
   })
+})
+
+describe("two processes on one sessions.db", () => {
+  // ★ busy_timeout was set after the switch to WAL, so two alfa processes opening the
+  //   database at once failed with "database is locked" instead of waiting — and the
+  //   mailbox only works when every session can open the same file
+  test("★ two processes opening a fresh database at once both get in, and mail crosses between them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "alfa-two-"))
+    const db = join(dir, "sessions.db")
+    const store = new URL("../src/session/store.ts", import.meta.url).pathname
+    const script = (role: string) => `
+      import { Store } from ${JSON.stringify(store)}
+      const s = new Store(${JSON.stringify(db)})
+      if (${JSON.stringify(role)} === "a") s.post({ to: "b", from: "a", fromDirectory: "/a", text: "你好" })
+      else for (let i = 0; i < 100; i++) { const m = s.takeMail("b"); if (m.length) { console.log(m[0].text); break } await Bun.sleep(20) }
+      s.close()`
+    try {
+      const [a, b] = ["a", "b"].map((role) => Bun.spawn([process.execPath, "-e", script(role)], { stdout: "pipe", stderr: "pipe" }))
+      const [codeA, codeB] = await Promise.all([a!.exited, b!.exited])
+      expect(await new Response(a!.stderr).text()).toBe("")
+      expect(await new Response(b!.stderr).text()).toBe("")
+      expect([codeA, codeB]).toEqual([0, 0])
+      expect((await new Response(b!.stdout).text()).trim()).toBe("你好")
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  }, 20_000)
 })
 
 describe("envelope for another agent's message", () => {
