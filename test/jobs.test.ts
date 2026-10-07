@@ -222,12 +222,10 @@ describe("★ job kill never reports a success that didn't happen", () => {
     }
     return {
       start: async () => snapshot,
-      resume: async () => snapshot,
       list: () => [snapshot],
       has: (id) => id === snapshot.id,
       read: async () => ({ job: snapshot, output: "", timedOut: false }),
       suspend: async () => ({ job: snapshot, output: "", timedOut: false, detail: "taskkill exited with 1" }),
-      kill: async () => ({ job: snapshot, output: "", timedOut: false, detail: "taskkill exited with 1", removed: snapshot.status === "exited" }),
       report: () => undefined,
       claimReport: () => undefined,
     }

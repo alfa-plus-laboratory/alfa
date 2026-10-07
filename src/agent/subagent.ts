@@ -30,8 +30,17 @@
  * 2. **It can't ask the user.** `ask` isn't in its tool list. It runs in the background
  *    while the user is talking to the main agent; faced with a question popping up out of
  *    nowhere, with no context, the user has no way to judge how to answer it. If something
- *    needs asking, the main agent should ask it with the subagent's conclusions in hand —
- *    by then the context is complete.
+ *    needs asking, it asks the main agent (`message` to "main", see tool/message.ts),
+ *    which can answer or put it to the user with the context in hand.
+ *
+ * ── A subagent is a session the user doesn't drive ──
+ * Its states are queued, running (waiting on the main agent counts as running) and
+ * finished. A finished one keeps its session and costs nothing; `message` wakes it with
+ * everything it read (see message()). There used to be a fourth, "removed" (`job kill`),
+ * made so the pinned row and `job list` could drop the ones nobody needed; now the pinned
+ * row shows only working ones, so the model has nothing to clean up, and stopping a
+ * subagent only stops its current work. The one subagent still removed outright is the
+ * trust review (see discard).
  *
  * ⚠ But **permissions are unchanged**. It goes through the same gatekeeper as the main
  *   agent, the same rule table, the same "don't ask again", so it can edit files just the
@@ -58,7 +67,7 @@
 import { forgetReads } from "../fs/freshness.ts"
 import { killAll as killProcessJobs } from "../tool/bash/jobs.ts"
 import { inspectLocalText, LOCAL_SOURCES } from "../tool/untrusted.ts"
-import { newSessionID } from "../session/id.ts"
+import { newMessageID, newPartID, newSessionID } from "../session/id.ts"
 import type { Store } from "../session/store.ts"
 import type { MessageWithParts, ToolPart } from "../session/schema.ts"
 import type { LLMStreamFn, ModelInfo, ModelRef, ReasoningEffort, Tokens } from "../llm/types.ts"
@@ -75,7 +84,7 @@ import {
 import { Emitter, type UIEvent } from "./events.ts"
 import { MAX_AGENT_JOBS, MAX_ALIVE_JOBS, MAX_FLOW_ALIVE_JOBS } from "./flow.ts"
 import { contextTokens } from "./tokens.ts"
-import { Loop } from "./loop.ts"
+import { isSettled, Loop } from "./loop.ts"
 
 /**
  * The window and the total both live in agent/flow.ts — config validation and the
@@ -261,14 +270,17 @@ interface AgentJob {
   controller: AbortController
   status: "queued" | "running" | "exited"
   /**
-   * Killed for good (`job kill`, `/agents <id> kill`). A stopped or finished subagent is
-   * otherwise suspended indefinitely and can be woken; kill is the one way to say "this
-   * one won't be needed again", so it stops being listed, read or woken — the same as a
-   * subagent of another session (see owns). Its session stays in the store like any other.
+   * Gone for good: no longer listed, read, messaged or woken — the same as a subagent of
+   * another session (see owns). Only discard() sets it. Its session stays in the store.
    */
   removed?: boolean
-  /** kill() was asked while it was still winding down: remove it the moment it exits */
+  /** discard() was asked while it was still winding down: remove it the moment it exits */
   removeWhenDone?: boolean
+  /**
+   * It asked the main agent something with `wait` and is paused inside that call; this
+   * hands it the answer. See awaitReply
+   */
+  awaiting?: (text: string) => void
   /**
    * The text it was given. **Held here while it's queued** — what actually goes out also
    * has what the jobs it waits on hand back spliced in front (see briefFor), and those
@@ -414,24 +426,21 @@ export class SubagentJobs implements AgentJobs {
   }
 
   /**
-   * Wake one that has finished and give it one more instruction. See AgentJobs.resume.
+   * Wake one that has finished and give it one more instruction. The model reaches this
+   * through message() — a message to a finished subagent is the follow-up; `task` used to
+   * have a separate resume for it, and two ways to say one thing only made the model
+   * hesitate between them.
    *
-   * ── Where it's cheap ──
    * That session lies untouched in the store, and the loop re-reads the full history from
    * the store every round — so "carrying on the conversation" needs nothing moved here:
    * append the new message, and when it wakes up it still holds everything it read in its
    * last run. Dispatching a blank one instead means re-explaining the whole background, and
    * what it reads is the same batch of files all over again.
-   *
-   * ── Where it's expensive (so the tool description has to say when not to use it) ──
-   * Carrying on means its tens of thousands of tokens of history **are resent every
-   * round**. And the entire point of dispatching a subagent is to burn those elsewhere — a
-   * subagent that's woken again and again slowly turns into a second main conversation.
-   * Use it to follow up on the same matter; for a different matter, dispatch a new one.
    */
-  async resume(id: string, prompt: string): Promise<JobSnapshot> {
-    const job = this.mine(id)
+  async resume(id: string, prompt: string, kind: Delivery = "assignment"): Promise<JobSnapshot> {
+    const job = this.mine(id) ?? this.bySession(id)
     if (!job) throw new UnknownAgentError(id)
+    id = job.id
     if (job.status !== "exited") {
       throw new Error(
         job.status === "queued"
@@ -469,7 +478,88 @@ export class SubagentJobs implements AgentJobs {
       this.deps.onChange?.()
       return snapshot(job, this.feedsOf(id))
     }
-    return this.launch(job, text)
+    return this.launch(job, text, kind)
+  }
+
+  /**
+   * A message from the agent that dispatched it, by name or session id. Returns the
+   * sentence the message tool reports back.
+   *
+   * Where it lands depends on what the subagent is doing:
+   *   waiting on the main agent — it is the answer to that call (awaitReply)
+   *   running   — appended to its session; the loop reads it at the next step
+   *   queued    — added to its brief, since it hasn't read anything yet
+   *   finished  — wakes it (resume), conversation intact
+   *
+   * ⚠ "Running" writes into a session another loop is writing: the second writer the
+   *   header of session/store.ts warns about. It is safe for the same reason the user's
+   *   mid-turn messages are (cli/main.ts injectUser): the loop only reads at step
+   *   boundaries, and a message landing after its last check is caught by the re-run in
+   *   launch().
+   * ★ It goes in as an ordinary user message, not a synthetic one: the dispatching agent
+   *   speaks to it with the same standing as the brief did, and the auto classifier counts
+   *   the brief as its intent (see delegatedTask in permission/auto/evidence.ts).
+   */
+  async message(to: string, text: string): Promise<string> {
+    const job = this.mine(to) ?? this.bySession(to)
+    if (!job) throw new UnknownAgentError(to)
+    const body = text.trim()
+    if (body.length === 0) throw new Error("text is required: the message itself.")
+    if (job.awaiting) {
+      const answer = job.awaiting
+      job.awaiting = undefined
+      answer(body)
+      return `Delivered to "${job.id}". It was waiting on you; this is its answer, and it carries on now.`
+    }
+    if (job.status === "running") {
+      appendUserText(this.deps.store, job.sessionID, `${MESSAGE_HEADING}\n\n${body}`)
+      this.append(job, `--- message from the main agent: ${firstLine(body).slice(0, 120)} ---`)
+      return `Delivered to "${job.id}". It is working and reads this at its next step. Its answer still reaches you on its own.`
+    }
+    if (job.status === "queued") {
+      job.prompt = `${job.prompt}\n\n# Added by the main agent before you started\n\n${body}`
+      return `"${job.id}" has not started yet; this was added to its brief.`
+    }
+    await this.resume(job.id, body, "message")
+    return `"${job.id}" had finished; this woke it with its whole conversation. Its answer will reach you on its own.`
+  }
+
+  /**
+   * A subagent asked the main agent something and pauses inside that tool call until the
+   * answer comes (message() hands it over). Waiting spends nothing; stopping the subagent
+   * aborts the call. See the top of tool/message.ts for why it waits inside the call
+   * rather than ending its turn.
+   */
+  awaitReply(id: string, signal: AbortSignal): Promise<string> {
+    const job = this.jobs.get(id)
+    if (!job || job.status !== "running") return Promise.reject(new Error("Only a running subagent can wait for the main agent."))
+    if (job.awaiting) return Promise.reject(new Error("You are already waiting for the main agent's answer."))
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        signal.removeEventListener("abort", stop)
+        job.activity = undefined
+        this.deps.onChange?.()
+      }
+      const stop = () => {
+        if (job.awaiting === answer) job.awaiting = undefined
+        done()
+        reject(new Error("Stopped while waiting for the main agent's answer."))
+      }
+      const answer = (text: string) => {
+        done()
+        resolve(text)
+      }
+      job.awaiting = answer
+      job.activity = "waiting for the main agent's answer"
+      this.deps.onChange?.()
+      if (signal.aborted) stop()
+      else signal.addEventListener("abort", stop, { once: true })
+    })
+  }
+
+  /** Waiting on the main agent's answer — for the main agent's list */
+  isAwaiting(id: string): boolean {
+    return this.mine(id)?.awaiting !== undefined
   }
 
   /**
@@ -477,7 +567,7 @@ export class SubagentJobs implements AgentJobs {
    * twice and sooner or later you get "wound down on start, forgot to on wake-up", the kind
    * of bug that only shows itself on the second run.
    */
-  private async launch(job: AgentJob, prompt: string): Promise<JobSnapshot> {
+  private async launch(job: AgentJob, prompt: string, kind: Delivery = "assignment"): Promise<JobSnapshot> {
     const { id, sessionID } = job
     // ★ These two lines must come **before the first await**. pump() releases jobs one at
     //   a time and relies on the count from running() to know how many window slots are
@@ -519,25 +609,38 @@ export class SubagentJobs implements AgentJobs {
       //   would only leave the subagent wrestling with itself in the background
     })
 
-    const run = loop
-      .run({
-        execution: {
-          requestKind: "subagent", runId: crypto.randomUUID(), sessionId: sessionID,
-          rootSessionId: job.parentSessionID, agentInstanceId: sessionID,
-          parentAgentInstanceId: job.parentSessionID, depth: 1,
-        },
-        sessionID,
-        model: model?.ref ?? this.deps.model(),
-        ...(effort ? { effort } : {}),
-        // The tool receipt knows the reserved ID, but the worker cannot see that receipt.
-        // Keep identity with the assignment so all workers retain the shared system prefix.
-        text: `# Assigned subagent identity
+    const runOnce = (text?: string) => loop.run({
+      execution: {
+        requestKind: "subagent", runId: crypto.randomUUID(), sessionId: sessionID,
+        rootSessionId: job.parentSessionID, agentInstanceId: sessionID,
+        parentAgentInstanceId: job.parentSessionID, depth: 1,
+      },
+      sessionID,
+      model: model?.ref ?? this.deps.model(),
+      ...(effort ? { effort } : {}),
+      ...(text !== undefined ? { text } : {}),
+      abortSignal: job.controller.signal,
+    })
+    // The tool receipt knows the reserved ID, but the worker cannot see that receipt.
+    // Keep identity with the assignment so all workers retain the shared system prefix.
+    const opening = `# Assigned subagent identity
 Your assigned job ID is ${JSON.stringify(id)}. Use this exact ID when asked for your own name or identity; do not infer it from the project or another agent's report.
 
-# Assignment
-${prompt}`,
-        abortSignal: job.controller.signal,
-      })
+${kind === "message" ? MESSAGE_HEADING : "# Assignment"}
+${prompt}`
+    const run = (async () => {
+      let result = await runOnce(opening)
+      let steps = result.steps
+      // ★ A message from the main agent can land after the loop's last look at history
+      //   and before this line: the loop has finished, but the session ends on a user
+      //   message nobody answered. Without this, its report would be empty (lastAssistantText
+      //   stops at that message) and the message would go unread.
+      while (!result.error && !result.interrupted && !result.hitStepLimit && !isSettled(this.deps.store.listAll(sessionID))) {
+        result = await runOnce()
+        steps += result.steps
+      }
+      return { ...result, steps }
+    })()
       .then((result) => {
         // Add, don't overwrite: for one that's been woken, steps is its lifetime total
         job.steps = stepsBefore + result.steps
@@ -629,23 +732,17 @@ ${prompt}`,
   }
 
   /**
-   * Done with this one for good: stop it if it's still working (the same path as
-   * suspend, cascade included), then remove it.
+   * Gone for good: stop it if it's still working (the same path as suspend, cascade
+   * included), then remove it — nobody can list, read, message or wake it again.
    *
-   * ── Why kill and suspend are two calls ──
-   * Stopping used to be the only call, and a stopped subagent stays suspended — that is
-   * what lets the main agent stop four scouts and then still ask one of them a question.
-   * But "these won't be needed again" had no call: a live run killed three suspended
-   * agents, got "Stopped" back each time, and they stayed in `job list` and the pinned
-   * row. So the model's vocabulary is now the user's: suspend when it may be asked again,
-   * kill when it won't. With agentflow a session can leave dozens behind; each is a line
-   * in the pinned row, in `/agents` and in the model's `job list`.
+   * Only the host calls this, for a subagent nobody may keep talking to: the trust review,
+   * whose whole session is a read of possibly hostile project text. The model's and the
+   * user's "stop" is suspend (see the file header for why removal left their vocabulary).
    *
    * ★ One still winding down when suspend's wait runs out is marked and removed the moment
-   *   it exits (settle). Its report then goes nowhere: the caller said it isn't wanted,
-   *   and delivering the answer of an agent nobody can look up again would only confuse.
+   *   it exits (settle). Its report then goes nowhere.
    */
-  async kill(id: string, reader: JobReader = "model"): Promise<JobReadResult & { removed: boolean }> {
+  async discard(id: string, reader: JobReader = "model"): Promise<JobReadResult & { removed: boolean }> {
     const job = this.mine(id)
     if (!job) throw new UnknownAgentError(id)
     const result = job.status === "exited" ? { job: this.snap(job), output: drain(job, reader), timedOut: false } : await this.suspend(id, reader)
@@ -682,7 +779,7 @@ ${prompt}`,
       // spot where "harmless, so leave it" slowly turns into a real bug
       if (job.status === "exited") continue
       job.controller.abort()
-      // The processes it started go with it. See the ★ in kill()
+      // The processes it started go with it. See the ★ in discard()
       void killProcessJobs(job.id)
     }
     return alive.length
@@ -953,6 +1050,16 @@ ${prompt}`,
     return job && this.owns(job) ? job : undefined
   }
 
+  /** The same, addressed by its session id — what other agents see it as */
+  private bySession(sessionID: string): AgentJob | undefined {
+    return [...this.jobs.values()].find((job) => job.sessionID === sessionID && this.owns(job))
+  }
+
+  /** Its name, if `to` is one of this session's subagents by name or session id */
+  resolve(to: string): string | undefined {
+    return (this.mine(to) ?? this.bySession(to))?.id
+  }
+
   /**
    * Subagent event → one line in the buffer.
    *
@@ -1104,11 +1211,32 @@ ${prompt}`,
 
 // ─────────────────────────────────────────────── Helpers
 
+/**
+ * How a woken subagent's new text is headed. A message wakes it under its own heading so
+ * it reads "the main agent is talking to me", not "a second assignment"
+ */
+type Delivery = "assignment" | "message"
+
+const MESSAGE_HEADING = "# Message from the main agent (the one that dispatched you)"
+
+/**
+ * One plain user message into a subagent's session, while its loop may be running. See
+ * the ⚠ on SubagentJobs.message
+ */
+function appendUserText(store: Store, sessionID: string, text: string): void {
+  const now = Date.now()
+  const id = newMessageID()
+  store.upsertMessage({ id, sessionID, role: "user", timeCreated: now })
+  store.upsertPart({ id: newPartID(), sessionID, messageID: id, timeCreated: now, type: "text", text })
+  store.touchSession(sessionID)
+}
+
 function snapshot(job: AgentJob, feeds: string[] = []): JobSnapshot {
   return {
     id: job.id,
     kind: "agent",
     command: job.description,
+    sessionID: job.sessionID,
     workdir: job.workdir,
     status: job.status,
     startedAt: job.startedAt,

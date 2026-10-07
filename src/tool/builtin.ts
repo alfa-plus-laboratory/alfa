@@ -17,6 +17,7 @@ import { GlobTool } from "./glob.ts"
 import { GrepTool } from "./grep.ts"
 import { JobTool } from "./job.ts"
 import { MemoryTool } from "./memory.ts"
+import { MessageTool } from "./message.ts"
 import { ReadTool } from "./read.ts"
 import { SkillTool } from "./skill.ts"
 import type { ToolRegistry } from "./registry.ts"
@@ -45,6 +46,9 @@ export function registerBuiltins(registry: ToolRegistry): ToolRegistry {
     .register(TaskTool)
     // Stop at a fork in the road and ask. See tool/ask.ts
     .register(AskTool)
+    // Talk to a subagent, the dispatching agent, or another live session. See
+    // tool/message.ts
+    .register(MessageTool)
     // Project memory that lives across sessions. See tool/memory.ts
     .register(MemoryTool)
     // Lets it check for itself how much context is left. See tool/context-window.ts

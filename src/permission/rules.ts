@@ -183,6 +183,12 @@ export const DEFAULTS: Ruleset = [
   // writes deny here
   { permission: "task", pattern: "*", action: "allow" },
 
+  // ── Message another agent: allow ──
+  // Sending touches nothing; whatever the receiver does about it goes through its own
+  // gate, and what it receives is marked as not from its user (see tool/message.ts).
+  // Listed so that "agents don't talk to each other" can be written as a deny
+  { permission: "message", pattern: "*", action: "allow" },
+
   // ── Cross-cutting guards ──
   { permission: "extension", pattern: "*", action: "ask" },
 
