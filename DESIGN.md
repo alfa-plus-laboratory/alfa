@@ -5178,6 +5178,19 @@ terminals. Output already in scrollback still shows the terminal's own reflow; o
 re-rendering the transcript would change that, and alfa's scrollback holds more than
 the session store can rebuild (banners, receipts, command output).
 
+### A quiet plan gets a reminder
+
+The todo description already said to mark each step done at once; a live run still
+wrote a 7-step plan, did six steps and ticked none, so the pinned row stayed on step 1.
+Now, when the main agent's plan has unfinished steps and NUDGE_EVERY (8) tool calls pass
+without a todo call, a `<plan-reminder>` is appended to that tool's result, at most once
+per 8 calls (`PlanNudge` in `tool/todo.ts`). It rides on a tool result rather than its
+own message: a user message mid-loop moves the loop boundary and drops the thinking of
+the turn whose tool calls are still open. Appended as the result is produced, it is
+stored that way, so history stays append-only. The screen strips it (`withoutNudge`).
+The asymmetry: a few dozen tokens and an occasional extra todo call, against a plan row
+the user can't trust.
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).

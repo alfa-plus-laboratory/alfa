@@ -72,7 +72,10 @@ export function adaptTools(options: AdaptOptions): ToolSet {
         //   premise that "what changed is visible right there"; without the diff that
         //   default no longer holds.
         ctx.metadata(result.metadata)
-        return result.output
+        // Appended as the result is produced, so it is stored this way too: history stays
+        // append-only. See PlanNudge in tool/todo.ts for why it rides here
+        const extra = ctx.nudge?.(def.id)
+        return extra ? `${result.output}\n\n${extra}` : result.output
       }
       if (options.nativeApplyPatch && def.id === "apply_patch") {
         return [def.id, openai.tools.applyPatch({ execute: async (input, context) => ({ status: "completed" as const, output: await execute(input, context) }) })] as const

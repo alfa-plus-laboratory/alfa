@@ -225,6 +225,11 @@ export interface ToolContext {
    * reaches its subagents and other live sessions, a subagent reaches only "main".
    */
   messenger?: import("./message.ts").Messenger
+  /**
+   * Asked after a tool call succeeds: text to append to what the model reads, or
+   * undefined. Only the main agent's context has one (see PlanNudge in tool/todo.ts).
+   */
+  nudge?(toolId: string): string | undefined
   /** Push intermediate progress to the UI (never enters the model's context). */
   onProgress(text: string): void
   /** Accumulate into this call's metadata; visible to both the UI and storage. */

@@ -206,3 +206,63 @@ export function parseTodos(value: unknown): TodoItem[] {
   }
   return out
 }
+
+/** Tool calls without a todo call before the plan reminder; see PlanNudge */
+export const NUDGE_EVERY = 8
+
+/**
+ * The reminder appended to a tool result when an unfinished plan has gone quiet.
+ *
+ * ── Why the harness reminds instead of the description insisting harder ──
+ * The description already says "mark a step done the moment it is finished". In a live
+ * run the model wrote a 7-step plan, did six of them, and never ticked one: the pinned
+ * row sat at the first step the whole time, and the user read the plan as broken. Heads
+ * down in the work, a model doesn't go back to its list; a nudge at the right moment is
+ * what Claude Code does too.
+ *
+ * ── Why it rides on a tool result, not a message of its own ──
+ * A new user message mid-loop would move the loop boundary (loopStartIndex in
+ * agent/to-model-messages.ts) and drop the thinking of the assistant turn whose tool
+ * calls are still open, which Anthropic refuses. Appended to the output as it is
+ * produced, it is stored that way, so history stays append-only and the cache holds.
+ *
+ * ★ Counted per tool call since the last todo call, and repeated at most every
+ *   NUDGE_EVERY calls: often enough that a stale plan gets fixed, rare enough that a
+ *   model working steadily through one long step isn't pestered. Only an unfinished plan
+ *   is nudged; no plan, or a finished one, never is. Main agent only — a subagent's plan
+ *   isn't shown to anyone.
+ */
+export class PlanNudge {
+  private since = 0
+  private remindedAt = 0
+
+  constructor(private readonly plan: () => readonly TodoItem[]) {}
+
+  /** Called after each tool call; returns the text to append, if any */
+  after(toolId: string): string | undefined {
+    if (toolId === "todo") {
+      this.since = 0
+      this.remindedAt = 0
+      return undefined
+    }
+    this.since++
+    const items = this.plan()
+    if (items.length === 0 || items.every((item) => item.status === "done")) return undefined
+    if (this.since < NUDGE_EVERY || this.since - this.remindedAt < NUDGE_EVERY) return undefined
+    this.remindedAt = this.since
+    return (
+      `<plan-reminder>\nYour plan has not been updated in the last ${this.since} tool calls. ` +
+      "If steps are finished, mark them done with todo (send the whole list); if the plan no longer fits, " +
+      "update it or clear it. If it is still accurate, ignore this.\n</plan-reminder>"
+    )
+  }
+}
+
+/**
+ * A tool output as the user should see it: without the plan reminder at its end. The
+ * reminder is for the model; bash cards show the last lines of their output, and that is
+ * exactly where it sits.
+ */
+export function withoutNudge(output: string): string {
+  return output.replace(/\n*<plan-reminder>[\s\S]*?<\/plan-reminder>\s*$/, "")
+}
