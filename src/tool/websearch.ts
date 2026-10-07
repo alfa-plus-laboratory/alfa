@@ -28,7 +28,7 @@ const Parameters = z.object({
   query: z
     .string()
     .describe(
-      'What to search for. Plain keywords work better than a sentence. Google operators work when the Google backend is configured: site:, intitle:, "exact phrase", -exclude.',
+      "What to search for. Plain keywords work better than a sentence.",
     ),
   count: z
     .number()
@@ -37,12 +37,6 @@ const Parameters = z.object({
     .max(MAX_COUNT)
     .optional()
     .describe(`How many results to return (default ${DEFAULT_COUNT})`),
-  page: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .describe("1-indexed page, for when the first page did not have it. Only the Google backend paginates."),
 })
 
 type Args = z.infer<typeof Parameters>
@@ -59,7 +53,7 @@ Also:
 - No results is a real answer, but a search that failed is not the same as a subject that does not exist — the output tells you which happened. Do not turn a failed search into "it does not exist".
 - Results carry a publication date when the backend supplies one. For anything time-sensitive, prefer the dated recent ones and say how old your sources were. A result with no date is not evidence of being current.
 
-Backends, picked automatically: Google Programmable Search (GOOGLE_CSE_KEY + GOOGLE_CSE_CX), Brave (BRAVE_API_KEY), Tavily (TAVILY_API_KEY), and otherwise DuckDuckGo's unauthenticated endpoint, which needs no account but rate-limits and then answers with a challenge page. When that happens the output says so — pass that on to the user rather than reporting it as "nothing found".`
+Backends, picked automatically: Brave (BRAVE_API_KEY), Tavily (TAVILY_API_KEY), and otherwise DuckDuckGo's unauthenticated endpoint, which needs no account but rate-limits and then answers with a challenge page. When that happens the output says so — pass that on to the user rather than reporting it as "nothing found".`
 
 export const WebSearchTool: ToolDef<Args> = {
   id: "websearch",
@@ -78,7 +72,6 @@ export const WebSearchTool: ToolDef<Args> = {
       query,
       count: args.count ?? DEFAULT_COUNT,
       signal: ctx.abortSignal,
-      ...(args.page ? { page: args.page } : {}),
     })
 
     if (outcome.hits.length === 0) {
