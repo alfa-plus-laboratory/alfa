@@ -7,7 +7,7 @@ import { Renderer } from "../src/cli/render.ts"
 import { setColorEnabled } from "../src/cli/theme.ts"
 import { stripAnsi } from "../src/cli/width.ts"
 import type { ToolPart } from "../src/session/schema.ts"
-import { parseTodos, TodoTool, type TodoItem } from "../src/tool/todo.ts"
+import { NUDGE_EVERY, parseTodos, PlanNudge, TodoTool, withoutNudge, type TodoItem } from "../src/tool/todo.ts"
 import type { ToolContext } from "../src/tool/types.ts"
 
 setColorEnabled(false)
@@ -189,5 +189,40 @@ describe("waterfall view", () => {
     const painted = stripAnsi(lines.join(""))
     expect(painted).toContain("读一遍渲染器")
     expect(painted).toContain("把滚动条拆出去")
+  })
+})
+
+describe("the plan reminder", () => {
+  const plan = (statuses: TodoItem["status"][]): TodoItem[] => statuses.map((status, i) => ({ text: `step ${i}`, status }))
+  const calls = (nudge: PlanNudge, n: number, id = "read") => Array.from({ length: n }, () => nudge.after(id))
+
+  // ★ A live run did six of seven steps without ticking one; the row sat at the first step
+  test("★ an unfinished plan quiet for NUDGE_EVERY tool calls gets one reminder, then not again for as long", () => {
+    const nudge = new PlanNudge(() => plan(["active", "pending"]))
+    const first = calls(nudge, NUDGE_EVERY)
+    expect(first.slice(0, -1).every((text) => text === undefined)).toBe(true)
+    expect(first.at(-1)).toContain("<plan-reminder>")
+    expect(calls(nudge, NUDGE_EVERY - 1).every((text) => text === undefined)).toBe(true)
+    expect(nudge.after("read")).toContain("<plan-reminder>")
+  })
+
+  test("a todo call starts the count over", () => {
+    const nudge = new PlanNudge(() => plan(["done", "active"]))
+    calls(nudge, NUDGE_EVERY - 1)
+    expect(nudge.after("todo")).toBeUndefined()
+    expect(calls(nudge, NUDGE_EVERY - 1).every((text) => text === undefined)).toBe(true)
+  })
+
+  test("no plan, or a finished one, is never nudged", () => {
+    expect(calls(new PlanNudge(() => []), NUDGE_EVERY * 3).every((text) => text === undefined)).toBe(true)
+    expect(calls(new PlanNudge(() => plan(["done", "done"])), NUDGE_EVERY * 3).every((text) => text === undefined)).toBe(true)
+  })
+
+  // bash cards show the last lines of output, which is where the reminder sits
+  test("the reminder is for the model: the output shown to the user has it removed", () => {
+    const nudge = new PlanNudge(() => plan(["active"]))
+    const reminder = calls(nudge, NUDGE_EVERY).at(-1)!
+    expect(withoutNudge(`line 1\nline 2\n\n${reminder}`)).toBe("line 1\nline 2")
+    expect(withoutNudge("plain output")).toBe("plain output")
   })
 })

@@ -65,3 +65,18 @@ describe("Argument validation", () => {
     expect(ran).toBe(0)
   })
 })
+
+describe("text appended after a tool call", () => {
+  // ★ The plan reminder rides on the tool result as it is produced (see PlanNudge in
+  //   tool/todo.ts); a message of its own would move the loop boundary mid-loop
+  test("a context with a nudge gets its text after the output; one without is untouched", async () => {
+    const run = async (nudge?: (id: string) => string | undefined) => {
+      const set = adaptTools({ tools: [FakeTool], makeToolContext: () => ({ ...ctx(), ...(nudge ? { nudge } : {}) }) as ToolContext })
+      const execute = (set["write"] as { execute: (input: unknown, options: unknown) => Promise<string> }).execute
+      return execute({ filePath: "a", content: "b" }, { toolCallId: "c1", abortSignal: new AbortController().signal, messages: [] })
+    }
+    expect(await run((id) => `seen ${id}`)).toBe("wrote a\n\nseen write")
+    expect(await run(() => undefined)).toBe("wrote a")
+    expect(await run()).toBe("wrote a")
+  })
+})

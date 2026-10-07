@@ -30,7 +30,7 @@ import { padToWidth, splitAtWidth, stripAnsi, wrapToWidth } from "./width.ts"
 import { terminalText } from "./terminal-text.ts"
 import type { ReasoningPart, ToolPart } from "../session/schema.ts"
 import type { Tokens } from "../llm/types.ts"
-import { parseTodos, type TodoItem } from "../tool/todo.ts"
+import { parseTodos, withoutNudge, type TodoItem } from "../tool/todo.ts"
 
 export interface RenderOptions {
   width?(): number
@@ -130,7 +130,13 @@ export class Renderer {
         // Thinking doesn't go through markdown: it's the model's scratch draft, not very
         // coherent to begin with, and rendering half headings and empty lists only makes
         // it harder to read. Dimming the whole stretch is enough.
-        else if (event.part.type === "reasoning" && this.reasoning === "full") this.write(theme.dim(event.delta))
+        // ★ Dimmed line by line, not the delta as one piece. A delta like "…right?\n\nHmm
+        //   wait" put its one dim code on the earlier line; the half line after the break
+        //   carried none, the live area redrew it at full brightness every frame, and it was
+        //   committed that way — the first words of a paragraph came out bright.
+        else if (event.part.type === "reasoning" && this.reasoning === "full") {
+          this.write(event.delta.split("\n").map((line) => (line.length > 0 ? theme.dim(line) : line)).join("\n"))
+        }
         break
 
       case "part.end":
@@ -191,7 +197,7 @@ export class Renderer {
         const failed = toolFailed(part)
         this.line((failed ? theme.error : theme.success)(`    ${failed ? "✗" : "↳"} ${this.owner(part)}${this.summaryOf(part)}`) + theme.muted(`  ${duration(ms)}`))
         if ((part.tool === "bash" || part.tool === "ssh") || this.outputMode === "expanded") {
-          const rows = wrapToWidth(terminalText(typeof part.state.metadata.displayOutput === "string" ? part.state.metadata.displayOutput : part.state.output).trimEnd(), Math.max(1, this.width() - 6))
+          const rows = wrapToWidth(terminalText(typeof part.state.metadata.displayOutput === "string" ? part.state.metadata.displayOutput : withoutNudge(part.state.output)).trimEnd(), Math.max(1, this.width() - 6))
           const shown = this.outputMode === "expanded" ? rows : rows.slice(-6)
           if (this.outputMode === "compact" && rows.length > shown.length) this.line(theme.muted(`    … ${uiText("earlier output", "前文已省略", "前の出力を省略")} · /detail ${part.callID}`))
           for (const row of shown) if (part.state.output) this.line(theme.tool(padToWidth("    │ " + row, this.width())))
@@ -473,7 +479,7 @@ export function toolDetails(part: ToolPart, root = ""): string {
       lines.push(`${terminalText(key)}:`, terminalText(typeof value === "string" ? value : JSON.stringify(value, null, 2)))
     }
   }
-  if (state.status === "completed") lines.push("", theme.accent(uiText("Result", "结果", "結果")), terminalText(outcomeLine(part, root)), "", terminalText(typeof state.metadata.displayOutput === "string" ? state.metadata.displayOutput : state.output))
+  if (state.status === "completed") lines.push("", theme.accent(uiText("Result", "结果", "結果")), terminalText(outcomeLine(part, root)), "", terminalText(typeof state.metadata.displayOutput === "string" ? state.metadata.displayOutput : withoutNudge(state.output)))
   if (state.status === "completed" && typeof state.metadata.diff === "string") lines.push("", ...diffLines(state.metadata.diff, root))
   if (state.status === "error") lines.push("", theme.error(terminalText(state.error)))
   return lines.join("\n")

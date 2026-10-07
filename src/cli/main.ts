@@ -159,7 +159,7 @@ import { footerLines } from "./footer.ts"
 import { pinnedRows } from "./pinned.ts"
 import { latestPlan } from "./plan.ts"
 import { Tips } from "./tips.ts"
-import { parseTodos, type TodoItem } from "../tool/todo.ts"
+import { parseTodos, PlanNudge, type TodoItem } from "../tool/todo.ts"
 import { aggregateCacheDiagnostics } from "../llm/cache/index.ts"
 import { displayWidth, padToWidth } from "./width.ts"
 import { brandMark, clearInteractiveViewport } from "./brand.ts"
@@ -574,14 +574,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   })
   const emitter = new Emitter<UIEvent>()
   emitter.on((event) => renderer.handle(event))
-  // What the main agent is doing, for the running line. Only the main emitter feeds it:
-  // subagents have their own streams and their own row (cli/pinned.ts)
-  const activity = new Activity()
-  emitter.on((event) => activity.handle(event))
   /**
    * The main agent's current checklist, for the pinned plan row. Fed by its own todo
    * calls; on session switch and compaction it is recomputed by latestPlan so it always
    * equals the list the model is actually sent.
+   *
+   * ⚠ Registered before Activity's listener. Activity repaints synchronously when the todo
+   *   call ends (with the animation off, nothing else repaints until the next event);
+   *   registered after it, that frame still showed the old progress and the new one
+   *   waited for whatever the model did next.
    */
   const plan: { items: TodoItem[] } = { items: [] }
   emitter.on((event) => {
@@ -590,6 +591,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const items = parseTodos(event.part.state.metadata["todos"])
     if (items.length > 0) plan.items = items
   })
+  // Reminds the main agent when its unfinished plan has gone quiet. See PlanNudge
+  const planNudge = new PlanNudge(() => plan.items)
+  // What the main agent is doing, for the running line. Only the main emitter feeds it:
+  // subagents have their own streams and their own row (cli/pinned.ts)
+  const activity = new Activity()
+  emitter.on((event) => activity.handle(event))
   /**
    * Something the pinned rows show changed outside the main event stream (a subagent's
    * step, a background process starting or dying). The interactive shell installs the
@@ -1066,7 +1073,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           ),
         ...(options.subagent
           ? { owner: options.subagent, messenger: childMessenger(options.subagent) }
-          : { inquire: (question: Question) => inquire(question), agents: subagents, messenger: mainMessenger }),
+          : { inquire: (question: Question) => inquire(question), agents: subagents, messenger: mainMessenger, nudge: (id: string) => planNudge.after(id) }),
         onProgress: options.subagent
           ? () => {}
           : (callID, text) => ui.preview(toolNames.get(callID) ?? "running", text),
