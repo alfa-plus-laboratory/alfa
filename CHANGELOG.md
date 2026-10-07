@@ -2,6 +2,31 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.16.0
+
+**Agents talk to each other while they work: the main agent and its subagents, and alfa
+sessions open side by side on one machine.**
+
+- A new `message` tool. The main agent can message a subagent by name or session id:
+  one that is working reads it at its next step, one still queued gets it in its brief,
+  and one that has finished wakes up with its whole conversation. A subagent can message
+  the main agent, and with `wait` it pauses until the answer comes back — the main agent
+  can answer itself or ask you first. Calling it with no arguments lists who can be
+  reached.
+- Separate alfa sessions on the same machine can message each other by session id. What
+  arrives is marked as coming from another agent, not from you: it never counts as your
+  approval in auto mode, and the receiving agent acts on a request in it only when that
+  fits what you asked it to do.
+- Following up with a subagent is now a message to it; `task` no longer has `resume`.
+  Asking to continue with a subagent no longer gets a warning about token cost.
+- Subagents are working or finished; nothing is "removed" any more. The pinned row shows
+  only the ones working, `/agents` lists the finished ones too, and `job kill`,
+  `/agents <id> kill` and `/agents kill` stop a subagent's work without losing its
+  conversation.
+- Guidance on running subagents moved from the `alfa-subagents` skill into the `task`
+  description, so the model no longer opens a skill before every dispatch. The skill is
+  gone.
+
 ## 0.15.1
 
 **Slash commands, questions and approvals each look like themselves instead of like the
