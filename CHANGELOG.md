@@ -2,6 +2,20 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.17.0
+
+**A question can come with the model's own pick, and agents keep talking to each other
+when they should.**
+
+- The `ask` card can mark one option as recommended: it is listed first with a
+  `(recommended)` badge, the cursor starts on it, and Enter picks it. Optional — with no
+  preference the model's order stands.
+- A subagent always keeps `message`, its line back to the main agent, even when its
+  tools are narrowed to read-only ones. Before, `["read", "glob", "grep"]` silently cut
+  it, and a scout asked to report back mid-way could not.
+- Two alfa sessions starting at the same moment no longer fail with "database is
+  locked"; messages between sessions depend on both opening the same file.
+
 ## 0.16.2
 
 **Resizing the window no longer throws the input box to the top or litters scrollback.**
