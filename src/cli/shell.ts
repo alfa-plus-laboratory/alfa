@@ -40,9 +40,10 @@ export interface ShellDeps {
   /** Draw the tail of the model's thinking under the running line. */
   thinkingPreview?(): boolean
   /**
-   * Rows pinned above the running line — plan progress, live subagents, background jobs —
-   * at most `max` of them. They stay while idle: an unfinished plan or a job still running
-   * is exactly what should be in view before the next message is typed.
+   * Rows pinned under the input box, above the footer — plan progress, working subagents,
+   * background jobs — at most `max` of them. They stay while idle: an unfinished plan or a
+   * job still running is exactly what should be in view before the next message is typed.
+   * Why under the box and not above the running line: see the top of cli/pinned.ts.
    */
   pinned?(width: number, max: number): string[]
   /**
@@ -342,9 +343,11 @@ export class Shell {
     }
     const choices = this.completionHidden ? undefined : complete(this.deps.editor.text, this.deps.editor.cursor, this.deps.files)
     const running = this.runningLine(width)
-    // Pinned rows get what a short terminal can spare after the input box's minimum
-    const pinnedMax = region.rows >= 24 ? 4 : region.rows >= 18 ? 2 : region.rows >= 14 ? 1 : 0
-    const above = [...(pinnedMax > 0 ? (this.deps.pinned?.(width, pinnedMax) ?? []).slice(0, pinnedMax) : []), ...running]
+    // Pinned rows get what a short terminal can spare after the input box's minimum. Six
+    // is a plan, three listed subagents, a jobs row and one to spare (see cli/pinned.ts)
+    const pinnedMax = region.rows >= 30 ? 6 : region.rows >= 24 ? 5 : region.rows >= 18 ? 3 : region.rows >= 14 ? 1 : 0
+    const pinned = pinnedMax > 0 ? (this.deps.pinned?.(width, pinnedMax) ?? []).slice(0, pinnedMax) : []
+    const above = [...running]
     if (choices?.items.length) {
       const count = Math.max(1, Math.min(6, region.rows - 6)), start = Math.max(0, this.completionIndex - count + 1)
       above.push(...choices.items.slice(start, start + count).map((item,i) => truncateToWidth((start + i === this.completionIndex ? theme.cyan("› ") : "  ") + (item.label ?? item.value) + "  " + theme.dim(item.hint), width)))
@@ -358,7 +361,7 @@ export class Shell {
       placeholder: this.placeholderText(),
       // The input box takes at most half the screen: when a big chunk is pasted in, the
       // conversation above must not be pushed off entirely
-      maxRows: Math.max(1, Math.min(12, region.rows - above.length - 8)),
+      maxRows: Math.max(1, Math.min(12, region.rows - above.length - pinned.length - 8)),
       framed: region.rows >= 10,
       marker: concern ? "❕ " : undefined,
       style: {
@@ -369,7 +372,7 @@ export class Shell {
       },
     })
     const footer = region.rows >= 12 ? (this.deps.footer?.(width) ?? []).slice(0, 2).map(line => truncateToWidth(line, width)) : []
-    const lines = [...above, ...box.lines, ...footer, this.statusLine(width)]
+    const lines = [...above, ...box.lines, ...pinned, ...footer, this.statusLine(width)]
     region.set(lines, { row: above.length + box.cursor.row, col: box.cursor.col })
   }
 

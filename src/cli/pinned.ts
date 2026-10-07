@@ -1,7 +1,16 @@
 /**
- * The rows pinned above the running line: how far the plan has got, which subagents are
+ * The rows pinned under the input box: how far the plan has got, which subagents are
  * working (running or queued), which background processes are running. At most a few
  * rows; the detail stays in the transcript, `/agents` and `/jobs`.
+ *
+ * ── Why under the input box, as a labelled column ──
+ * They used to sit above the running line, between the conversation and "what it is
+ * doing now", so the running line was pushed away from the box it is about and the eye
+ * had to skip a block of state to get from the last reply to the prompt. Under the box
+ * they join the footer as one status panel, and conversation → running line → input
+ * reads top to bottom without a break. Each row starts with a short label (plan / agents
+ * / jobs) padded to one column, and agent names are padded too, so what they are doing
+ * lines up — a stack of rows that each start somewhere else reads as noise.
  *
  * ── Why these came back after 0.10 ──
  * The retired full-screen UI had a plan pane and a subagent grid; 0.10 dropped both and
@@ -16,11 +25,13 @@
  * ── One row per concern, and a bound on each ──
  * The plan is one row (progress + the item in progress), not the checklist: the full
  * list costs up to a dozen rows on every screen, and the question it answers in passing
- * is "how far along", not "what are all the steps". Subagents get one summary row that
- * holds any number of them — up to 24 one cell each, beyond that a proportional strip —
- * plus detail rows (the running ones) only when height allows. Agentflow allows a
- * hundred alive at once; a design that needs a row per agent fails exactly when it's
- * used hardest.
+ * is "how far along", not "what are all the steps". Up to LIST_AGENTS working
+ * subagents get a row each and no summary: a count above three names is a row spent
+ * saying what the names already say, and folding three agents into "+2 more" hid two of
+ * the three. Past that, one summary row holds any number — up to 24 one cell each, beyond
+ * that a proportional strip — plus detail rows (the running ones) only when height
+ * allows. Agentflow allows a hundred alive at once; a design that needs a row per agent
+ * fails exactly when it's used hardest.
  *
  * ── Which subagents count: the working ones ──
  * A finished subagent is not gone — its session stays, and a message wakes it with
@@ -36,9 +47,13 @@ import type { TodoItem } from "../tool/todo.ts"
 import { uiText } from "../i18n/index.ts"
 import { planProgress } from "./plan.ts"
 import { theme } from "./theme.ts"
-import { displayWidth, truncateToWidth } from "./width.ts"
+import { displayWidth, padToWidth, truncateToWidth } from "./width.ts"
 
 const PLAN_BAR = 10
+/** At most this many working subagents are listed one per row; more get a summary */
+const LIST_AGENTS = 3
+/** Agent names are padded to align their activity, up to this many columns */
+const NAME_COLUMNS = 20
 /** One cell per agent up to this many; past it the strip turns proportional. */
 const STRIP_CELLS = 24
 
@@ -51,60 +66,108 @@ export interface PinnedInput {
 export function pinnedRows(input: PinnedInput, width: number, max: number): string[] {
   if (max <= 0) return []
   const plan = planRow(input.plan, width)
-  const agents = agentRows(input.agents, width)
   const jobs = jobRow(input.jobs, width)
-  // Summary rows first, in a fixed order; agent detail only with height to spare
-  const rows = [plan, agents[0], jobs].filter((row): row is string => row !== undefined)
-  const spare = max - rows.length
-  if (spare > 0 && agents.length > 1) {
-    const detail = agents.slice(1)
-    const at = rows.indexOf(agents[0]!) + 1
-    rows.splice(at, 0, ...(detail.length > spare ? [...detail.slice(0, spare - 1), moreRow(detail.length - spare + 1, width)] : detail))
-  }
-  return rows.slice(0, max)
+  // Agents get what plan and jobs leave, and always at least their first row: when height
+  // runs out, jobs give way before agents (the slice below cuts from the end)
+  const fixed = [plan, jobs].filter((row) => row !== undefined).length
+  const agents = agentRows(input.agents, width, Math.max(1, max - fixed))
+  return [plan, ...agents, jobs].filter((row): row is string => row !== undefined).slice(0, max)
 }
 
-/** `▰▰▰▱▱▱▱▱▱▱ 3/10 ▸ add 3-language copy`. Absent when there's no plan or it's all done. */
+/** `plan   ▰▰▰▱▱▱▱▱▱▱ 3/10 ▸ add 3-language copy`. Absent when there's no plan or it's all done. */
 export function planRow(items: readonly TodoItem[], width: number): string | undefined {
   if (items.length === 0) return undefined
   const progress = planProgress(items)
   if (progress.done === progress.total) return undefined
   const filled = Math.round((progress.done / progress.total) * PLAN_BAR)
   const bar = theme.cyan("▰".repeat(filled)) + theme.dim("▱".repeat(PLAN_BAR - filled))
-  const head = `  ${bar} ${progress.done}/${progress.total}`
   const next = progress.active || items.find(item => item.status === "pending")?.text || ""
   const mark = progress.active ? theme.cyan(" ▸ ") : theme.dim(" ○ ")
-  const room = Math.max(4, width - displayWidth(head) - 3)
-  return truncateToWidth(head + (next ? mark + truncateToWidth(next, room) : ""), width)
+  return labelled(labels().plan, `${bar} ${progress.done}/${progress.total}${next ? mark + oneLine(next) : ""}`, width)
 }
 
-/** Row 0 is the summary; then the running ones' latest activity, newest first. */
-export function agentRows(jobs: readonly JobSnapshot[], width: number): string[] {
+/**
+ * The working subagents within `budget` rows. Up to LIST_AGENTS (and the budget allows):
+ * one row each, running ones newest first, then queued. Past that: a summary row, then
+ * the running ones' latest activity as height allows, then `+N more`.
+ */
+export function agentRows(jobs: readonly JobSnapshot[], width: number, budget = Infinity): string[] {
   const agents = jobs.filter(job => job.kind === "agent")
-  const running = agents.filter(job => job.status === "running")
-  const queued = agents.filter(job => job.status === "queued").length
-  if (running.length === 0 && queued === 0) return []
-  const cells = strip([["running", running.length], ["queued", queued]])
+  const running = agents.filter(job => job.status === "running").sort((a, b) => b.startedAt - a.startedAt)
+  const queued = agents.filter(job => job.status === "queued")
+  const working = [...running, ...queued]
+  if (working.length === 0 || budget <= 0) return []
+  const label = labels().agents
+
+  if (working.length <= LIST_AGENTS && working.length <= budget) {
+    const names = Math.min(NAME_COLUMNS, Math.max(...working.map(job => displayWidth(job.id))))
+    return working.map((job, i) => {
+      const body = agentLine(job, names)
+      return i === 0 ? labelled(label, body, width) : continued(body, width)
+    })
+  }
+
+  const cells = strip([["running", running.length], ["queued", queued.length]])
   const counts = [
     running.length > 0 ? uiText(`${running.length} running`, `${running.length} 运行中`, `${running.length} 実行中`) : "",
-    queued > 0 ? uiText(`${queued} queued`, `${queued} 排队`, `${queued} 待機`) : "",
+    queued.length > 0 ? uiText(`${queued.length} queued`, `${queued.length} 排队`, `${queued.length} 待機`) : "",
   ].filter(Boolean).join(theme.dim(" · "))
-  const summary = truncateToWidth(`  ${theme.bold(uiText("agents", "子代理", "エージェント"))} ${cells} ${counts}`, width)
-  const detail = [...running].sort((a, b) => b.startedAt - a.startedAt).map(job =>
-    truncateToWidth(`    ${theme.cyan("●")} ${job.id}${theme.dim(` · ${oneLine(job.activity || job.command)}`)}`, width))
-  return [summary, ...detail]
+  const rows = [labelled(label, `${cells} ${counts}`, width)]
+  const room = budget - 1
+  if (room <= 0 || running.length === 0) return rows
+  // Room for one row only: the newest one, since the summary already gives the count
+  const shown = running.length <= room ? running : room === 1 ? running.slice(0, 1) : running.slice(0, room - 1)
+  // Padded to the names actually drawn, not to one that's folded into "+N more"
+  const names = Math.min(NAME_COLUMNS, Math.max(...shown.map(job => displayWidth(job.id))))
+  const detail = shown.map(job => continued(agentLine(job, names), width))
+  const hidden = running.length - shown.length
+  return [...rows, ...detail, ...(hidden > 0 && room > 1 ? [moreRow(hidden, width)] : [])]
 }
 
-/** `jobs 2 running · bun run dev · pytest -x`. Background processes started by anyone. */
+/** `jobs   2 running · bun run dev · pytest -x`. Background processes started by anyone. */
 export function jobRow(jobs: readonly JobSnapshot[], width: number): string | undefined {
   const running = jobs.filter(job => job.kind === "process" && job.status === "running")
   if (running.length === 0) return undefined
   const names = running.map(job => oneLine(job.command)).join(theme.dim(" · "))
-  return truncateToWidth(`  ${theme.bold(uiText("jobs", "后台", "ジョブ"))} ${uiText(`${running.length} running`, `${running.length} 运行中`, `${running.length} 実行中`)}${theme.dim(" · ")}${theme.dim(names)}`, width)
+  return labelled(labels().jobs, `${uiText(`${running.length} running`, `${running.length} 运行中`, `${running.length} 実行中`)}${theme.dim(" · ")}${theme.dim(names)}`, width)
+}
+
+/** `● scout    · read src/x.ts` — the name padded so activities line up */
+function agentLine(job: JobSnapshot, names: number): string {
+  const name = padToWidth(truncateToWidth(job.id, names), names)
+  if (job.status === "queued") {
+    const waiting = job.after && job.after.length > 0
+      ? uiText(`waiting for ${job.after.join(", ")}`, `等待 ${job.after.join("、")}`, `${job.after.join("、")} を待機`)
+      : uiText("queued", "排队中", "待機中")
+    return `${theme.dim("○")} ${name}${theme.dim(` · ${waiting}`)}`
+  }
+  return `${theme.cyan("●")} ${name}${theme.dim(` · ${oneLine(job.activity || job.command)}`)}`
 }
 
 function moreRow(count: number, width: number): string {
-  return truncateToWidth(theme.dim(`    +${count} ${uiText("more", "个", "件")} · /agents`), width)
+  return continued(theme.dim(`+${count} ${uiText("more", "个", "件")} · /agents`), width)
+}
+
+function labels(): { plan: string; agents: string; jobs: string } {
+  return {
+    plan: uiText("plan", "计划", "計画"),
+    agents: uiText("agents", "子代理", "エージェント"),
+    jobs: uiText("jobs", "后台", "ジョブ"),
+  }
+}
+
+/** One column for every label in the current language, so the rows' contents line up */
+function labelColumn(): number {
+  return Math.max(...Object.values(labels()).map(displayWidth))
+}
+
+function labelled(label: string, body: string, width: number): string {
+  return truncateToWidth(`  ${theme.muted(padToWidth(label, labelColumn()))}  ${body}`, width)
+}
+
+/** A row under a labelled one: blank where the label was */
+function continued(body: string, width: number): string {
+  return truncateToWidth(`  ${" ".repeat(labelColumn())}  ${body}`, width)
 }
 
 type Cell = "running" | "queued"

@@ -309,8 +309,8 @@ const job = (over: Partial<JobSnapshot>): JobSnapshot =>
 describe("pinned rows", () => {
   const items = (statuses: TodoItem["status"][]): TodoItem[] => statuses.map((status, i) => ({ text: `step ${i}`, status }))
 
-  test("the plan is one row: progress and the item in progress", () => {
-    expect(stripAnsi(planRow(items(["done", "done", "active", "pending", "pending"]), 80)!)).toBe("  ▰▰▰▰▱▱▱▱▱▱ 2/5 ▸ step 2")
+  test("the plan is one labelled row: progress and the item in progress", () => {
+    expect(stripAnsi(planRow(items(["done", "done", "active", "pending", "pending"]), 80)!)).toBe("  plan    ▰▰▰▰▱▱▱▱▱▱ 2/5 ▸ step 2")
   })
 
   test("a finished or empty plan leaves no row", () => {
@@ -322,8 +322,39 @@ describe("pinned rows", () => {
   //   keeping them in the row is what once made a "remove" kill necessary
   test("★ only working subagents get a row; finished ones are left to /agents", () => {
     const rows = agentRows([job({ id: "audit", status: "exited", exit: 0, endedAt: 5 }), job({ id: "parser", activity: "read src/x.ts" })], 80).map(stripAnsi)
-    expect(rows).toEqual(["  agents ● 1 running", "    ● parser · read src/x.ts"])
+    expect(rows).toEqual(["  agents  ● parser · read src/x.ts"])
     expect(agentRows([job({ id: "audit", status: "exited", exit: 1 })], 80)).toEqual([])
+  })
+
+  // ★ Three agents folded into a summary and "+2 more" hid two of the three; up to three,
+  //   each gets its row, names padded so what they are doing lines up
+  test("★ up to three working subagents are listed one per row, aligned, newest first, queued last", () => {
+    const rows = agentRows([
+      job({ id: "content-scanner", startedAt: 1, activity: "bash find ." }),
+      job({ id: "sizer", startedAt: 2, activity: "read a" }),
+      job({ id: "verify", status: "queued", after: ["sizer"] }),
+    ], 80).map(stripAnsi)
+    expect(rows).toEqual([
+      "  agents  ● sizer           · read a",
+      "          ● content-scanner · bash find .",
+      "          ○ verify          · waiting for sizer",
+    ])
+  })
+
+  test("past three, a summary row, then the running ones as height allows, then +N more", () => {
+    const four = Array.from({ length: 4 }, (_, i) => job({ id: `a${i}`, startedAt: i, activity: `step ${i}` }))
+    const rows = agentRows(four, 80, 3).map(stripAnsi)
+    expect(rows).toEqual([
+      "  agents  ●●●● 4 running",
+      "          ● a3 · step 3",
+      "          +3 more · /agents",
+    ])
+    expect(agentRows(four, 80, 5).map(stripAnsi)).toHaveLength(5)
+  })
+
+  test("three agents with room for fewer rows fall back to the summary", () => {
+    const three = Array.from({ length: 3 }, (_, i) => job({ id: `a${i}`, startedAt: i }))
+    expect(agentRows(three, 80, 2).map(stripAnsi)[0]).toBe("  agents  ●●● 3 running")
   })
 
   test("★ a hundred agents still fit one row, and a few queued keep their cell", () => {
@@ -332,8 +363,8 @@ describe("pinned rows", () => {
       job({ id: "q1", status: "queued" }),
       job({ id: "q2", status: "queued" }),
     ]
-    const summary = stripAnsi(agentRows(many, 200)[0]!)
-    const strip = summary.split(" ")[3]!
+    const summary = stripAnsi(agentRows(many, 200, 1)[0]!)
+    const strip = summary.trim().split(/\s+/)[1]!
     expect([...strip].length).toBe(24)
     expect(strip).toContain("○")
     expect(summary).toContain("98 running · 2 queued")
@@ -343,20 +374,43 @@ describe("pinned rows", () => {
     expect(agentRows([], 80)).toEqual([])
   })
 
-  test("background processes get one row with their commands", () => {
-    expect(stripAnsi(jobRow([job({ kind: "process", command: "bun run dev" }), job({ kind: "process", command: "old", status: "exited" })], 80)!)).toBe("  jobs 1 running · bun run dev")
+  test("background processes get one labelled row with their commands", () => {
+    expect(stripAnsi(jobRow([job({ kind: "process", command: "bun run dev" }), job({ kind: "process", command: "old", status: "exited" })], 80)!)).toBe("  jobs    1 running · bun run dev")
   })
 
-  test("the row budget is respected and detail gives way first", () => {
+  test("labels share one column in every language, so the contents line up", () => {
+    try {
+      setInterfaceLanguage("zh")
+      const rows = pinnedRows({ plan: items(["active"]), agents: [job({ id: "x" })], jobs: [job({ kind: "process", command: "dev" })] }, 80, 6).map(stripAnsi)
+      const starts = rows.map(row => displayWidth(row.slice(0, row.search(/[▰▱●]|\d/))))
+      expect(new Set(starts).size).toBe(1)
+    } finally { setInterfaceLanguage("en") }
+  })
+
+  test("the row budget is respected: detail gives way first, then jobs, never the agents row", () => {
     const input = { plan: items(["active", "pending"]), agents: [job({ id: "x" }), job({ id: "y" })], jobs: [job({ kind: "process", command: "dev" })] }
+    expect(pinnedRows(input, 80, 4).map(stripAnsi)).toHaveLength(4)
     const three = pinnedRows(input, 80, 3).map(stripAnsi)
-    expect(three.length).toBe(3)
     expect(three[1]).toContain("agents")
     expect(three[2]).toContain("jobs")
-    const five = pinnedRows(input, 80, 5).map(stripAnsi)
-    expect(five.length).toBe(5)
-    expect(five[2]).toContain("● ")
+    const two = pinnedRows(input, 80, 2).map(stripAnsi)
+    expect(two[1]).toContain("agents")
     expect(pinnedRows(input, 80, 0)).toEqual([])
+  })
+
+  // ★ Above the running line they split "what it's doing now" from the box it is about
+  test("★ the shell draws them under the input box, above the status line", () => {
+    const keyboard = fakeKeyboard(), frames: string[][] = []
+    const region = { active: true, width: 80, rows: 30, set: (lines: string[]) => frames.push(lines), clear() {} } as unknown as LiveRegion
+    const shell = new Shell({ keyboard, region, editor: new Editor([]), pinned: () => ["PINNED"], onSubmit() {}, onCancel() {}, onExit() {} })
+    shell.start()
+    try {
+      const lines = frames.at(-1)!.map(stripAnsi)
+      const at = lines.indexOf("PINNED")
+      expect(at).toBeGreaterThan(0)
+      expect(lines[at - 1]).toMatch(/^─+$/)
+      expect(at).toBe(lines.length - 2)
+    } finally { shell.stop(); keyboard.close() }
   })
 })
 
