@@ -2,6 +2,16 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.16.2
+
+**Resizing the window no longer throws the input box to the top or litters scrollback.**
+
+- On resize only the live area at the bottom is redrawn. Before, the screen was cleared:
+  the input box jumped to the top of an empty screen, and macOS Terminal and iTerm2 kept
+  a copy of the old, re-wrapped frame in scrollback for every step of a window drag.
+- The running line (`⢎⠑⣇ bash · 1m30s`) has a blank row above it, so it no longer reads
+  as the last line of the output.
+
 ## 0.16.1
 
 **The status rows sit under the input box, and the speed meter stops sinking while a
