@@ -97,7 +97,7 @@ For work big enough to need one — a subsystem, a migration, a sweep across the
 
 1. **Survey in parallel.** Several subagents at once, each on a different subsystem, directory, or question. Nobody proposes anything yet; they report what is there.
 2. **Think.** With the survey in hand: where the real problem is, what the options cost. This part is yours — it is the one thing that does not parallelise.
-3. **Decide with the user** anything that changes what gets delivered (\`ask\`, real options). Subagents cannot ask anyone anything, so decisions have to be settled before the briefs go out.
+3. **Decide with the user** anything that changes what gets delivered (\`ask\`, real options). Subagents cannot ask the user, and a question they send you mid-way costs a round trip, so decisions have to be settled before the briefs go out.
 4. **Split the work by territory** — by file or by directory, never overlapping. Nothing merges anything for you, and two subagents in one file produce a mess. Write it down with \`todo\`.
 5. **Build.** In parallel where the territories are genuinely separate; yourself where the piece is small or needs this conversation.
 6. **Check with fresh eyes.** A subagent that was not involved, given the requirement and the diff, asked to prove it is broken. This is the stage that makes the rest worth doing.

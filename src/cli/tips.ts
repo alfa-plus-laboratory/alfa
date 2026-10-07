@@ -53,7 +53,7 @@ const POOL: (() => string)[] = [
   () => uiText("Ctrl-J or Alt-Enter adds a new line", "Ctrl-J 或 Alt-Enter 换行", "Ctrl-J か Alt-Enter で改行"),
   () => uiText("Ctrl-V pastes a clipboard image", "Ctrl-V 粘贴剪贴板里的图片", "Ctrl-V でクリップボード画像を貼付"),
   () => uiText("/agentflow runs subagents in parallel", "/agentflow 让子代理并行干活", "/agentflow でサブエージェント並列化"),
-  () => uiText("/agents lists subagents, running or suspended", "/agents 查看运行中与挂起的子代理", "/agents で実行中・一時停止中を確認"),
+  () => uiText("/agents lists subagents, working or finished", "/agents 查看工作中与已结束的子代理", "/agents で作業中・終了済みを確認"),
   () => uiText("/jobs lists background processes", "/jobs 查看后台进程", "/jobs でバックグラウンド処理を確認"),
   () => uiText("/detail <id> shows a tool's full output", "/detail <id> 查看工具完整输出", "/detail <id> でツールの全出力"),
   () => uiText("/think toggles extended thinking", "/think 开关深度思考", "/think で拡張思考を切替"),

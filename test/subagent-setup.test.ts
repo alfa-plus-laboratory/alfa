@@ -191,19 +191,6 @@ describe("model and effort", () => {
 
 describe("the task tool", () => {
   /**
-   * ★ A woken subagent's history was produced under its setup; switching model or tools
-   *   re-sends all of it at full price. Refused, not silently ignored — ignoring it would
-   *   leave the main agent believing the scout now runs on the cheap model.
-   */
-  test("★ refuses a new setup on resume", async () => {
-    const h = harness()
-    await TaskTool.execute({ name: "scout", prompt: "look" }, context(h.agents))
-    await settled(h.agents, "scout")
-    await expect(TaskTool.execute({ resume: "scout", prompt: "more", model: "p/small" }, context(h.agents))).rejects.toThrow(/only apply when starting/)
-    await expect(TaskTool.execute({ resume: "scout", prompt: "more", tools: ["read"] }, context(h.agents))).rejects.toThrow(/only apply when starting/)
-  })
-
-  /**
    * ★ A mistyped model name only fails at the provider, within the settle window. The
    *   host's own delivery used to claim that report first (settle announced the exit
    *   synchronously), and the task call — where the main agent reads why it didn't start

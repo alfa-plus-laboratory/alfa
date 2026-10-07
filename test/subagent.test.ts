@@ -152,11 +152,9 @@ function harness(options: HarnessOptions = {}) {
 }
 
 /**
- * Which session that subagent was opened in.
- *
- * JobSnapshot **deliberately has no** sessionID (neither the model nor the UI needs it),
- * so this asks the DB directly: child sessions are the ones with a parent_id (see
- * agent/subagent.ts).
+ * Which session that subagent was opened in, asked of the DB directly (child sessions
+ * are the ones with a parent_id, see agent/subagent.ts) rather than of the snapshot the
+ * code under test produces.
  */
 function sessionOf(h: { store: Store }, _id: string): string {
   const db = (h.store as unknown as { db: { query(sql: string): { all(): unknown[] } } }).db
@@ -279,32 +277,80 @@ describe("waking up a finished one", () => {
 
 // ─────────────────────────────────────────────── ownership
 
-describe("suspend keeps it, kill removes it", () => {
-  test("★ a suspended one keeps its memory and can be woken", async () => {
+describe("stopping keeps it; only the host can discard one", () => {
+  test("★ a stopped one keeps its memory, and a message wakes it", async () => {
     const h = harness({ hang: true })
     const job = await h.agents.start({ name: "slow", prompt: "等" })
     const result = await h.agents.suspend(job.id)
     expect(result.job.status).toBe("exited")
     expect(h.agents.list()).toHaveLength(1)
-    await h.agents.resume(job.id, "再说一句")
+    expect(await h.agents.message(job.id, "再说一句")).toContain("woke it")
     await h.agents.killAll()
   })
 
-  test("★ kill removes a running one for good: not listed, not wakeable", async () => {
+  test("★ discard removes it for good: not listed, not reachable by message — the trust review relies on it", async () => {
     const h = harness({ hang: true })
     const job = await h.agents.start({ name: "slow", prompt: "等" })
-    const result = await h.agents.kill(job.id)
+    const result = await h.agents.discard(job.id)
     expect(result.removed).toBe(true)
     expect(h.agents.list()).toEqual([])
-    await expect(h.agents.resume(job.id, "再看")).rejects.toThrow(/No subagent named/)
+    await expect(h.agents.message(job.id, "再看")).rejects.toThrow(/No subagent named/)
+  })
+})
+
+describe("messages from the main agent", () => {
+  // ★ The whole point of messaging a working subagent: it reads the message at its next
+  //   step instead of only after it has finished the wrong thing
+  test("★ a working one reads the message at its next step, in the same run", async () => {
+    const h = harness({ hold: true, script: [say("先说一半"), say("按你说的改了")] })
+    const job = await h.agents.start({ name: "scout", prompt: "去查" })
+    expect(await h.agents.message(job.id, "只看 src/auth")).toContain("next step")
+    h.release()
+    await settled(h.agents, job.id)
+    expect(h.requests).toHaveLength(2)
+    expect(JSON.stringify(h.requests[1]!.messages)).toContain("只看 src/auth")
+    expect(h.agents.report(job.id)).toContain("按你说的改了")
   })
 
-  test("kill on a suspended one removes it too — that is the call for 'not needed any more'", async () => {
-    const h = harness()
+  test("a session id reaches it as well as its name — that is how other agents see it", async () => {
+    const h = harness({ script: [say("一"), say("二")] })
     const job = await h.agents.start({ name: "scout", prompt: "看" })
     await settled(h.agents, job.id)
-    expect((await h.agents.kill(job.id)).removed).toBe(true)
-    expect(h.agents.list()).toEqual([])
+    expect(h.agents.resolve(sessionOf(h, job.id))).toBe(job.id)
+    await h.agents.message(sessionOf(h, job.id), "再看")
+    await settled(h.agents, job.id)
+    expect(h.agents.report(job.id)).toContain("二")
+  })
+
+  test("★ a subagent waiting on the main agent gets the message as the answer to its call", async () => {
+    const h = harness({ hang: true })
+    const job = await h.agents.start({ name: "scout", prompt: "等" })
+    const signal = new AbortController().signal
+    const reply = h.agents.awaitReply(job.id, signal)
+    expect(h.agents.isAwaiting(job.id)).toBe(true)
+    expect(await h.agents.message(job.id, "用方案 B")).toContain("waiting on you")
+    expect(await reply).toBe("用方案 B")
+    expect(h.agents.isAwaiting(job.id)).toBe(false)
+    await h.agents.killAll()
+  })
+
+  test("stopping a subagent that is waiting ends the wait instead of leaving it hanging", async () => {
+    const h = harness({ hang: true })
+    const job = await h.agents.start({ name: "scout", prompt: "等" })
+    const controller = new AbortController()
+    const reply = h.agents.awaitReply(job.id, controller.signal)
+    controller.abort()
+    await expect(reply).rejects.toThrow(/Stopped while waiting/)
+    expect(h.agents.isAwaiting(job.id)).toBe(false)
+    await h.agents.killAll()
+  })
+
+  test("one still queued gets the message in its brief", async () => {
+    const h = harness({ hang: true })
+    await h.agents.start({ name: "scout", prompt: "去查" })
+    const queued = await h.agents.start({ name: "verify", prompt: "核对", after: ["scout"] })
+    expect(await h.agents.message(queued.id, "顺便看测试")).toContain("added to its brief")
+    await h.agents.killAll()
   })
 })
 
@@ -321,7 +367,7 @@ describe("follows the session that dispatched it", () => {
     // read, stop, and claiming the report all treat it as nonexistent — saying "hands off"
     // only sends the model looking for a way around
     await expect(h.agents.read(job.id, 0)).rejects.toThrow(/No subagent named/)
-    await expect(h.agents.kill(job.id)).rejects.toThrow(/No subagent named/)
+    await expect(h.agents.message(job.id, "再看")).rejects.toThrow(/No subagent named/)
     await expect(h.agents.suspend(job.id)).rejects.toThrow(/No subagent named/)
     expect(h.agents.report(job.id)).toBeUndefined()
     expect(h.agents.claimReport(job.id)).toBeUndefined()
@@ -705,25 +751,22 @@ describe("job tool manages both processes and subagents", () => {
     agents,
   })
 
-  test("★ a finished one is listed to the model as suspended, with how to wake it — 'finished' read as 'used up'", async () => {
+  test("★ a finished one is listed with how to wake it — 'finished' read as 'used up'", async () => {
     const h = harness()
     const job = await h.agents.start({ name: "scout", prompt: "看" })
     await settled(h.agents, job.id)
     const result = await JobTool.execute({ action: "list" }, context(h.agents))
-    expect(result.output).toContain("scout  suspended after")
-    expect(result.output).toContain(`task resume:"${job.id}"`)
+    expect(result.output).toContain("scout  finished after")
+    expect(result.output).toContain(`a message to "${job.id}" wakes it`)
   })
 
-  test("★ job suspend keeps a subagent; job kill removes it; killing a suspended one isn't a no-op 'Stopped'", async () => {
+  test("★ job kill stops a subagent's work but keeps it: still listed, a message wakes it", async () => {
     const h = harness({ hang: true })
     const job = await h.agents.start({ name: "slow", prompt: "等" })
-    const suspended = await JobTool.execute({ action: "suspend", id: job.id }, context(h.agents))
-    expect(suspended.output).toContain(`Suspended ${job.id}`)
-    const again = await JobTool.execute({ action: "suspend", id: job.id }, context(h.agents))
-    expect(again.output).toContain("already stopped")
     const killed = await JobTool.execute({ action: "kill", id: job.id }, context(h.agents))
-    expect(killed.output).toContain("removed for good")
-    expect((await JobTool.execute({ action: "list" }, context(h.agents))).output).not.toContain(job.id)
+    expect(killed.output).toContain(`Stopped ${job.id}`)
+    expect(killed.output).toContain("keeps its conversation")
+    expect((await JobTool.execute({ action: "list" }, context(h.agents))).output).toContain(job.id)
   })
 
   test("list shows both kinds together and marks which are subagents", async () => {
@@ -828,13 +871,13 @@ describe("task tool", () => {
   })
 
   /**
-   * ★ Resume used to come with a bolded "every further round re-sends that whole
+   * ★ Following up used to come with a bolded "every further round re-sends that whole
    *   conversation", and the model warned the user about token cost each time they asked
    *   to continue with a subagent. Following up with one is ordinary; this guards both
    *   the instruction and the absence of the cost line.
    */
-  test("resume is presented as the ordinary way to continue, with no cost warning", () => {
-    expect(TaskTool.description).toContain("When the user wants to continue with one, resume it.")
+  test("following up is presented as the ordinary way to continue, with no cost warning", () => {
+    expect(TaskTool.description).toContain("when the user wants to continue with one, message it.")
     expect(TaskTool.description).not.toMatch(/re-sends?/)
   })
 
@@ -882,17 +925,6 @@ describe("task tool", () => {
     expect(result.output).toContain("stopped without doing the work")
   })
 
-  test("★ resume reuses the same agent, so the brief needn't repeat the background", async () => {
-    const h = harness({ script: [say("第一份"), say("第二份")] })
-    await TaskTool.execute({ name: "scout", prompt: "先看一遍" }, context(h.agents))
-    await settled(h.agents, "scout")
-    const result = await TaskTool.execute({ resume: "scout", prompt: "再看一下测试那边" }, context(h.agents))
-    expect(result.metadata["job"]).toBe("scout")
-    expect(result.metadata["resumed"]).toBe(true)
-    expect(h.agents.list()).toHaveLength(1)
-    await settled(h.agents, "scout")
-  })
-
   test("★ after builds a pipeline and says up front what it's waiting for", async () => {
     const h = harness({ hang: true })
     await TaskTool.execute({ name: "scout", prompt: "去查" }, context(h.agents))
@@ -909,25 +941,11 @@ describe("task tool", () => {
     await h.agents.killAll()
   })
 
-  test("after can't be combined with resume — the only way this graph could form a cycle", async () => {
-    const h = harness({ script: [say("一"), say("二")] })
-    await TaskTool.execute({ name: "scout", prompt: "去查" }, context(h.agents))
-    await settled(h.agents, "scout")
-    await expect(
-      TaskTool.execute({ resume: "scout", after: ["scout"], prompt: "再看看" }, context(h.agents)),
-    ).rejects.toThrow(/"after" only works when starting a new subagent/)
-  })
-
-  test("name together with resume likely means the model is unsure which it wants; report it so it picks", async () => {
-    const h = harness()
-    await expect(
-      TaskTool.execute({ name: "scout", resume: "scout", prompt: "go" }, context(h.agents)),
-    ).rejects.toThrow(/either "name".*or "resume"/)
-  })
-
-  test("neither is rejected too — no way to know which to start", async () => {
-    const h = harness()
-    await expect(TaskTool.execute({ prompt: "go" }, context(h.agents))).rejects.toThrow(/name is required/)
+  // ★ Following up is message's job now; two ways to say "talk to that one" only made
+  //   the model choose between them
+  test("task only starts: there is no resume parameter any more", () => {
+    expect(Object.keys((TaskTool.parameters as unknown as { shape: object }).shape)).not.toContain("resume")
+    expect(TaskTool.description).toContain("`message` to it wakes it")
   })
 
   test("a host that can't start subagents says so, so the model does the work itself", async () => {

@@ -78,7 +78,7 @@ Named providers share three protocol adapters: `anthropic`, `openai-responses` (
 
 The terminal's native scrollback is the permanent transcript. Answers, errors, approvals and edit/write diffs stay visible; the input area shows only current activity. `/detail` retrieves the most recent full tool record; `/detail read` or `/detail <callID>` selects records. `/jobs` and `/agents` show background work. Native selection and copying work without mouse capture.
 
-While it works, the line above the input shows what it's doing (thinking, writing, which tool), a turn clock and the tail of its thinking; pinned rows show the plan's progress, subagents (running or suspended — a suspended one keeps its memory and can be woken; `kill` removes one for good) and background processes. The footer shows how full the context is, the actual prompt-cache hit rate and the output speed.
+While it works, the line above the input shows what it's doing (thinking, writing, which tool), a turn clock and the tail of its thinking; pinned rows show the plan's progress, subagents that are working (a finished one keeps its memory, and the main agent can message it to pick up where it left off) and background processes. The footer shows how full the context is, the actual prompt-cache hit rate and the output speed.
 
 - Enter sends; while running it supplements or queues input. Ctrl-J / Alt-Enter inserts a newline.
 - Esc interrupts. Ctrl-C clears or interrupts; twice on empty input exits. Ctrl-D exits.
