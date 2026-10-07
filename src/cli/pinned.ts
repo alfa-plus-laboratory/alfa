@@ -74,16 +74,30 @@ export function pinnedRows(input: PinnedInput, width: number, max: number): stri
   return [plan, ...agents, jobs].filter((row): row is string => row !== undefined).slice(0, max)
 }
 
-/** `plan   ▰▰▰▱▱▱▱▱▱▱ 3/10 ▸ add 3-language copy`. Absent when there's no plan or it's all done. */
+/**
+ * `plan   ▰▰▰▰▱▱▱▱▱▱ 3/6 ▸ add 3-language copy`. Absent when there's no plan or it's all
+ * done.
+ *
+ * ★ The number is the position of the step named after it, not how many are done. It
+ *   used to be the done count, and next to "▸ the step in progress" it read as the step
+ *   number: working on step 1 showed `0/6`, and a model that updates its plan rarely
+ *   left it at 0 for most of the work. Taken from the named step's own index, so a plan
+ *   worked out of order still points at the right step.
+ * The bar counts done steps plus half of the active one: it moves when a step starts,
+ * and stays short of full until the last step is really done.
+ */
 export function planRow(items: readonly TodoItem[], width: number): string | undefined {
   if (items.length === 0) return undefined
   const progress = planProgress(items)
   if (progress.done === progress.total) return undefined
-  const filled = Math.round((progress.done / progress.total) * PLAN_BAR)
+  const active = items.findIndex(item => item.status === "active")
+  const at = active >= 0 ? active : items.findIndex(item => item.status === "pending")
+  const filled = Math.min(PLAN_BAR - 1, Math.round(((progress.done + (active >= 0 ? 0.5 : 0)) / progress.total) * PLAN_BAR))
   const bar = theme.cyan("▰".repeat(filled)) + theme.dim("▱".repeat(PLAN_BAR - filled))
-  const next = progress.active || items.find(item => item.status === "pending")?.text || ""
-  const mark = progress.active ? theme.cyan(" ▸ ") : theme.dim(" ○ ")
-  return labelled(labels().plan, `${bar} ${progress.done}/${progress.total}${next ? mark + oneLine(next) : ""}`, width)
+  const next = at >= 0 ? items[at]!.text : ""
+  const mark = active >= 0 ? theme.cyan(" ▸ ") : theme.dim(" ○ ")
+  const step = at >= 0 ? at + 1 : progress.done
+  return labelled(labels().plan, `${bar} ${step}/${progress.total}${next ? mark + oneLine(next) : ""}`, width)
 }
 
 /**

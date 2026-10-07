@@ -349,8 +349,26 @@ const job = (over: Partial<JobSnapshot>): JobSnapshot =>
 describe("pinned rows", () => {
   const items = (statuses: TodoItem["status"][]): TodoItem[] => statuses.map((status, i) => ({ text: `step ${i}`, status }))
 
-  test("the plan is one labelled row: progress and the item in progress", () => {
-    expect(stripAnsi(planRow(items(["done", "done", "active", "pending", "pending"]), 80)!)).toBe("  plan    ▰▰▰▰▱▱▱▱▱▱ 2/5 ▸ step 2")
+  // Item texts are 0-based ("step 2" is the third item), the number shown is 1-based
+  test("the plan is one labelled row: the step in progress, and its position", () => {
+    expect(stripAnsi(planRow(items(["done", "done", "active", "pending", "pending"]), 80)!)).toBe("  plan    ▰▰▰▰▰▱▱▱▱▱ 3/5 ▸ step 2")
+  })
+
+  // ★ The number was the done count: working on step 1 showed 0/6, read as "step 0"
+  test("★ working on the first step shows 1, and the bar has already moved", () => {
+    expect(stripAnsi(planRow(items(["active", "pending", "pending", "pending", "pending", "pending"]), 80)!)).toBe("  plan    ▰▱▱▱▱▱▱▱▱▱ 1/6 ▸ step 0")
+  })
+
+  test("the last step in progress shows n/n, but the bar stays short of full until it is done", () => {
+    const row = stripAnsi(planRow(items(["done", "done", "active"]), 80)!)
+    expect(row).toContain("3/3 ▸ step 2")
+    expect(row).toContain("▱")
+  })
+
+  test("the number follows the step it names, even when the plan is worked out of order", () => {
+    expect(stripAnsi(planRow(items(["active", "pending", "done"]), 80)!)).toContain("1/3 ▸ step 0")
+    // nothing in progress: the next pending step, marked as not started
+    expect(stripAnsi(planRow(items(["done", "pending", "pending"]), 80)!)).toBe("  plan    ▰▰▰▱▱▱▱▱▱▱ 2/3 ○ step 1")
   })
 
   test("a finished or empty plan leaves no row", () => {

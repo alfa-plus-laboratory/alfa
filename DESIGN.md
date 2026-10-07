@@ -89,14 +89,15 @@ paint() redraws even when nothing changed; I'll skip identical frames.
     +    if (committed.length === 0 && sameLines(block, this.painted)) return
 
   ● bash bun test live
-  ▰▰▰▰▱▱▱▱▱▱ 2/5 ▸ run the live tests
-  agents ◌● 1 running · 1 suspended
+
   ⢎⡱⣇ bash · 12s · esc to interrupt
   │ (pass) live > skips identical frames
   │ (pass) live > moves only the cursor
 ──────────────────────────────────────────────────────────────────────────
 › then update the README_
 ──────────────────────────────────────────────────────────────────────────
+  plan    ▰▰▰▰▰▱▱▱▱▱ 3/5 ▸ run the live tests
+  agents  ● scout · read src/cli/live.ts
 ~/code/alfa
 minimax/MiniMax-M3 · ▓▓▓░░░░░ 41% ctx · cache 96% · 48 tok/s
   auto
@@ -289,9 +290,10 @@ sentence when the model started saying something else; the full record lived in
 The checklist itself is current: the model has a `todo` tool, and its checklist is printed
 into the transcript under the call's result line (`planRows` in `cli/plan.ts`) — in full
 the first time and whenever the items change, otherwise only the items whose status moved
-(`planChanges`). What's retired is the pinned pane; since 0.15 a single pinned row above
-the running line shows the progress and the item in progress (`planRow` in
-`cli/pinned.ts`). Dropping a plan is its own call, `clear: true`: an empty list stays an
+(`planChanges`). What's retired is the pinned pane; since 0.15 a single pinned row shows the
+step in progress and its position — under the input box since 0.16.1, and numbered by
+position (`3/5` while the third step runs; it used to be the done count, and working on
+step 1 read as "step 0") — see `planRow` in `cli/pinned.ts`. Dropping a plan is its own call, `clear: true`: an empty list stays an
 error so a forgotten `items` can't wipe the plan, but with no legal way to drop one, a
 model told "forget all that" wrote a one-step placeholder that stayed pinned.
 
