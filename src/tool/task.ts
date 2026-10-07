@@ -22,35 +22,35 @@
  * dispatching, say one short line and stop — stopping is not slacking off, it is handing
  * the conversation back to the user.
  *
- * ── Why only half of the description is left ──
- * The **semantics** of `after` / `resume` are already spelled out in the parameter
- * descriptions, and parameter descriptions are always loaded. The old DESCRIPTION told the
- * same story again in other words — those two paragraphs alone ran to over a thousand
- * characters, paid for in every session and on every request, while the turns that
- * actually send out a team are very few.
+ * ── What the description says, and what it leaves to the parameters ──
+ * The test: **what the parameter descriptions already say, don't say a second time; what
+ * only takes effect after the call, must stay.** The semantics of `after` / `resume` /
+ * `model` / `effort` / `tools` live in the parameter descriptions (always loaded); the
+ * description carries only what they can't: what happens after the call, how to split
+ * writers, where a chained answer goes.
  *
- * So what moved out is "how to use it well" (the cost of chaining, the cost of resume, what
- * happens when two of them write the same file), and it went to the `alfa-subagents`
- * built-in skill; what stayed is "when to use it, and what to do afterwards" — the latter
- * is **behavior shaping**, and loading on demand does nothing for it (see the ★ in
- * prompt/builtin-skills.ts: the model will not go and open a skill that constrains itself).
- *
- * The test is this one: **what the parameter descriptions already say, don't say a second
- * time; what only takes effect after the call, must stay.**
+ * ★ Tried and reverted: moving "how to use it well" (chaining, resume, setup, writers) into
+ *   an `alfa-subagents` built-in skill, with a closing line here saying "open it first".
+ *   That line covered nearly every real dispatch, so the model opened the skill before
+ *   each one — an extra step and a "let me check the skill first" line every time — and
+ *   most of what it held was behavior shaping (don't duplicate, split by file, don't
+ *   downgrade the model unasked), which the ★ in prompt/builtin-skills.ts says a skill
+ *   can't carry. Folded back, condensed: about 1k characters in the cached prefix, and
+ *   subagents don't pay it (task isn't in their tool list).
  *
  * ── A finished one can still be woken (resume), and there is **no expiry** ──
  * Its whole session lies intact in the store; waking it costs just one more run of the
- * loop — and it is still holding everything it read last round. When following up on the
- * same thing, dispatching a blank one means explaining the background all over again and
- * re-reading the same batch of files. Conversely, the description also says plainly when
- * not to use it: carrying on the conversation means its tens of thousands of tokens of
- * history get re-sent every turn, and the whole point of dispatching a subagent is to burn
- * those somewhere else.
+ * loop — and it is still holding everything it read last round. A blank one would need
+ * the background explained again and the same files re-read.
+ * ⚠ So the description presents resume as the normal way to keep working with one, and
+ *   says nothing about its history being re-sent. The skill used to stress that in bold,
+ *   and the model took it as a risk to warn the user about every time they asked to
+ *   continue with a subagent — when re-sending history is what every turn of every
+ *   conversation does, mostly at the cached rate. The only real line is "same work →
+ *   resume, unrelated work → fresh", and that is stated without a cost argument.
  *
  * ── model / effort / tools: the setup is the caller's, the checking is not ──
- * All three default to "same as me". Their semantics live in the parameter descriptions
- * (always loaded); how to choose them well lives in the `alfa-subagents` skill — same
- * split as after/resume above. Names are checked in agent/subagent.ts (resolveSetup),
+ * All three default to "same as me". Names are checked in agent/subagent.ts (resolveSetup),
  * which knows the tool list and the model registry; this file only refuses the
  * combinations that can't mean anything, like choosing a setup for a resumed agent.
  */
@@ -138,9 +138,13 @@ Usage rules:
 - Say what to report back, and how much: "list every call site with file:line" gets you that; "look into X" gets you an essay.
 - It cannot ask the user anything, and it cannot start subagents of its own. If the work needs a decision from the user, get that decision first (ask tool), then send it in the brief.
 - **If a skill in your catalogue covers what you are sending out, name it in the brief** — "read the \`cut-a-release\` skill first". The subagent has the same catalogue and the same \`skill\` tool, but not the conversation that made that skill relevant, and a narrow brief gives it no reason to go looking. Naming it is enough; do not paste its text.
-- It CAN edit files and run commands, through the same permission gate you do — unless \`tools\` leaves those out. Two of them editing one file at the same time produce a mess, and nothing merges anything for you.
+- It CAN edit files and run commands, through the same permission gate you do — unless \`tools\` leaves those out. Two of them editing one file at the same time produce a mess, and nothing merges anything for you; waiting on each other does not prevent it, only the briefs do. Split writers by file or directory, or do the editing yourself once they report.
 
-Chaining several with \`after\`, waking a finished one with \`resume\`, choosing \`model\` / \`effort\` / \`tools\`, or sending out a wave that writes: **open the \`alfa-subagents\` skill first.** What those cost, and how to split the work so they do not collide, is there rather than here — it is the difference between a fleet that pays for itself and one that does not.`
+Chaining: with \`after\` you can lay out the whole shape of the work in one turn — fan out, then one that checks or merges what came back. A subagent that another is waiting on delivers its answer to that one, not to you, so a dozen finders do not fill your context; \`job\` can still read any of them.
+
+Following up: a finished subagent keeps its whole conversation, so \`resume\` is the normal way to keep working with it — say only what is new. When the user wants to continue with one, resume it. Start a fresh one for unrelated work.
+
+Setup: set \`model\`, \`effort\` or \`tools\` only when the user asked or the job clearly calls for it — a scout that misses the answer because it was cheap costs more than it saved. Leaving \`skill\` out of \`tools\` means it cannot open a skill you named.`
 
 export const TaskTool: ToolDef<Args> = {
   id: "task",

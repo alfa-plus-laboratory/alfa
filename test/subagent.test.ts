@@ -817,15 +817,25 @@ describe("task tool", () => {
   })
 
   /**
-   * ★ Since the chaining and resume sections of the description moved into
-   *   `alfa-subagents`, **this pointer is its only entry point**. The catalog line can
-   *   only say what it covers, not "you're about to send out a team, read this first" —
-   *   and this is exactly the sentence most likely to be deleted as filler in the next
-   *   trim. The symptom of deleting it isn't an error; it's the model making up the
-   *   semantics of after on its own.
+   * ★ The `alfa-subagents` skill was folded back into this description because pointing
+   *   at it made the model open it before every dispatch. Bringing a pointer back brings
+   *   that step back; the guidance has to stay here.
    */
-  test("the description points to alfa-subagents before sending out a team", () => {
-    expect(TaskTool.description).toContain("alfa-subagents")
+  test("the description carries its own guidance instead of sending the model to a skill", () => {
+    expect(TaskTool.description).not.toContain("alfa-subagents")
+    // where a chained answer goes is the one thing the after parameter can't say
+    expect(TaskTool.description).toContain("delivers its answer to that one, not to you")
+  })
+
+  /**
+   * ★ Resume used to come with a bolded "every further round re-sends that whole
+   *   conversation", and the model warned the user about token cost each time they asked
+   *   to continue with a subagent. Following up with one is ordinary; this guards both
+   *   the instruction and the absence of the cost line.
+   */
+  test("resume is presented as the ordinary way to continue, with no cost warning", () => {
+    expect(TaskTool.description).toContain("When the user wants to continue with one, resume it.")
+    expect(TaskTool.description).not.toMatch(/re-sends?/)
   })
 
   const context = (agents: SubagentJobs, over: Partial<ToolContext> = {}): ToolContext => ({
