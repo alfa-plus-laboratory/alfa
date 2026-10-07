@@ -68,7 +68,7 @@ Subagents: when you judge one will not be needed again, kill it; otherwise suspe
 
 Jobs are named after what they are: "npm run dev" becomes "dev", "cargo watch -x run" becomes "watch", a subagent auditing the auth flow becomes "audit". Use that name as the id; names are never reused, even after a job finishes. A job that ended is still listed, with its exit code — "not found" and "failed" are different answers.
 
-Do NOT sit in a loop of reads waiting for a subagent to finish. Nothing in this tool blocks for a subagent, and its answer is delivered to you on its own the moment it is done. When the user asks what one is doing, "list" already answers it: read it once, say it in a line, and stop — every read is a step in which you are not talking to the user, who is still there and can send you something at any moment. When reading a subagent's output is worth it at all is in the \`alfa-subagents\` skill.
+Do NOT sit in a loop of reads waiting for a subagent to finish. Nothing in this tool blocks for a subagent, and its answer is delivered to you on its own the moment it is done. When the user asks what one is doing, "list" already answers it: read it once, say it in a line, and stop — every read is a step in which you are not talking to the user, who is still there and can send you something at any moment. Read a subagent's output only when the user asks how one is going, or to see whether one taking very long is still moving.
 
 Stop the jobs you started once you no longer need them. Everything left running is stopped when the session ends, but a forgotten dev server holds its port for the rest of the session.`
 

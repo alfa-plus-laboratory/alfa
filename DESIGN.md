@@ -5105,6 +5105,20 @@ permission mode, auto included.
 Existing explicit settings are preserved; the current user's installation was separately
 set to off at their request. Filesystem authorization and tool approval remain independent.
 
+### Subagent guidance lives in the task description again
+
+The `alfa-subagents` built-in skill is folded back into `task`'s description, condensed,
+and removed. The description ended with "open the skill first" for chaining, resume,
+setup and writers, which is nearly every real dispatch, so the model opened it every time
+and announced it doing so. A skill only saves anything when most uses never open it; this
+one was opened on every use, and most of it was behavior shaping a skill can't carry.
+Resume is now described as the ordinary way to keep working with a subagent: the bolded
+"every further round re-sends that whole conversation" made the model warn about token
+cost whenever the user asked to continue with one, though re-sending history is what
+every turn does, mostly at the cached rate. The asymmetry: about 1k characters in the
+main agent's cached prefix (subagents don't carry task) against an extra step and a
+spurious warning on every dispatch.
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).
