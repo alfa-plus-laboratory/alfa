@@ -4523,7 +4523,7 @@ async function boxed(deps: InteractiveDeps, keyboard: Keyboard): Promise<number>
       const snapshot = deps.meter.snapshot
       return footerLines({
         path: deps.workspace.path, spec: deps.spec(), ratio: snapshot.ratio, estimated: snapshot.estimated,
-        cache: footerCache(), speed: deps.activity.speed(), thinking: deps.thinking(), effort: deps.effort(),
+        cache: footerCache(), speed: deps.activity.speed(), spent: snapshot.spent.total, thinking: deps.thinking(), effort: deps.effort(),
       }, width)
     },
     activity: deps.activity,

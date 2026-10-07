@@ -879,7 +879,7 @@ test("SSH offers session approval but not persistent approval, and keys match th
 function approvalTerminal() {
   const frames: string[] = []
   const output = Object.assign(new EventEmitter(), { columns: 64, rows: 20, isTTY: true, write: (s: string) => { frames.push(s); return true } }) as unknown as NodeJS.WriteStream
-  const region = new LiveRegion({ output, enabled: true })
+  const region = new LiveRegion({ output, enabled: true, resizeSettleMs: 0 })
   return { region, output, frames, last: () => stripAnsi(frames.at(-1) ?? "") }
 }
 
@@ -954,9 +954,9 @@ test("a long approval can expand and scroll to its end, and resize or cancel res
     expect(term.last()).toContain("step-29")
     Object.assign(term.output, { columns: 28, rows: 12 })
     term.output.emit("resize")
-    // The resize repaint runs in a microtask. Without waiting, this asserted the frame
-    // from before the resize — which only held while every frame redrew the whole card
-    await Promise.resolve()
+    // The resize repaint waits for the size to settle. Without waiting, this asserted the
+    // frame from before the resize — which only held while every frame redrew the whole card
+    await Bun.sleep(1)
     expect(term.last()).toContain("reject")
     controller.abort()
     expect(await answer).toBe("reject")

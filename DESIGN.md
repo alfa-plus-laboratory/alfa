@@ -5478,3 +5478,27 @@ may ask, and answering it already is the consent, so confirm's blanket "ask abou
 everything" now skips the `ask` tool (`askNow` in `permission/gate.ts`). It is the only
 exemption, and it's narrow: a user rule of `ask` or `deny` for it still holds, and todo,
 memory and the rest are still confirmed — they change state, a question doesn't.
+
+### A resize waits for the size to hold still
+
+The reflow-aware erase above was right for one resize and wrong for a drag. A drag sends
+a resize per frame, and each was repainted in a microtask: the frame was laid out for a
+width the terminal had already left by the time the bytes arrived, the terminal wrapped
+those lines itself, our cursor moves undercounted, and every later erase left part of a
+frame behind — a drag across the screen left a stack of narrow running lines and box
+borders. Now a resize is acted on only after RESIZE_SETTLE_MS (100 ms) without another;
+until then nothing is written (erase, spinner ticks, committed output all wait), and then
+one erase is computed at the final width. Reflow depends only on the logical lines, so
+that erase is right however the drag got there. The asymmetry: the frame stays where the
+terminal's reflow put it for 100 ms after the drag stops, which is what any other text
+on screen does anyway; painting during the drag corrupted the screen for good.
+
+### The footer counts what the session has spent
+
+The footer carried no absolute token count on purpose: the context figure only has to
+answer "compact now or not". Spend is a different question — what has this cost so far
+— and no ratio answers it, so the meter's `spent.total` (subagents included, kept
+through compaction and seeded from history on resume, the figure `/context` breaks down)
+now sits after the cache rate as `1.2M tokens`. It says `tokens`, not `tok`, so it can't
+be read as the speed next to it, and on a narrow screen it gives way right after the
+speed: it informs, the percentage and cache rate drive decisions.

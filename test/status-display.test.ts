@@ -330,14 +330,21 @@ describe("footer", () => {
     expect(stripAnsi(footerLines({ ...input }, 120)[1]!)).not.toContain("cache")
   })
 
+  test("the session's total spend sits between the cache rate and the speed, and nothing yet shows nothing", () => {
+    const line = stripAnsi(footerLines({ ...input, cache: 0.96, spent: 1_234_567, speed: { rate: 48.2, estimated: false } }, 120)[1]!)
+    expect(line).toBe("anthropic/claude-opus-5 · ▓▓▓░░░░░ 41% ctx · cache 96% · 1.2M tokens · 48 tok/s")
+    expect(stripAnsi(footerLines({ ...input, spent: 0 }, 120)[1]!)).not.toContain("tokens")
+  })
+
   test("a live estimate is marked", () => {
     expect(stripAnsi(footerLines({ ...input, speed: { rate: 7.25, estimated: true } }, 120)[1]!)).toContain("~7.3 tok/s")
   })
 
   test("★ on a narrow screen speed, cache and the bar give way; the percentage stays", () => {
-    const line = stripAnsi(footerLines({ ...input, cache: 0.9, speed: { rate: 40, estimated: false } }, 30)[1]!)
+    const line = stripAnsi(footerLines({ ...input, cache: 0.9, spent: 50_000, speed: { rate: 40, estimated: false } }, 30)[1]!)
     expect(line).toContain("41% ctx")
     expect(line).not.toContain("tok/s")
+    expect(line).not.toContain("tokens")
     expect(line).not.toContain("▓")
     expect(displayWidth(line)).toBeLessThanOrEqual(30)
   })
