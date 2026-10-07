@@ -40,8 +40,8 @@ import type { ToolDef, ToolContext } from "./types.ts"
 const MAX_WAIT_SECONDS = 120
 
 const Parameters = z.object({
-  action: z.enum(["list", "output", "suspend", "kill"]).describe("What to do"),
-  id: z.string().optional().describe('The job name, e.g. "dev". Required for "output", "suspend" and "kill".'),
+  action: z.enum(["list", "output", "kill"]).describe("What to do"),
+  id: z.string().optional().describe('The job name, e.g. "dev". Required for "output" and "kill".'),
   wait: z
     .number()
     .min(0)
@@ -61,14 +61,12 @@ const DESCRIPTION = `Inspects and controls background work: processes started wi
 Actions:
 - list: everything this session started, running or finished. A running job shows how long it has been going and what it is doing right now.
 - output: what has been produced since you last read it, plus whether it is still alive. Output is incremental — each read gives you only what is new, so reading repeatedly is cheap and never repeats itself. For a PROCESS you may pass wait to block until there is something new: start a server, then read with wait: 10 until it prints that it is listening, instead of guessing with sleep.
-- suspend (subagents only): stop a subagent you may need again. It stops working but keeps its whole memory, and \`task\` resume wakes it. A subagent that finishes on its own is suspended too.
-- kill: stop a job for good and collect whatever it produced last. A killed subagent is removed — it leaves the list and can never be resumed. **Read what it tells you.** It confirms the process actually ended; when it could not, it says so and the job is still running. Never report something as stopped on the strength of having called kill — on Windows in particular, a tree can survive it and keep holding its port.
+- kill: stop a job and collect whatever it produced last. A process is gone for good. A subagent only stops its current work: it keeps its whole conversation, and a \`message\` to it wakes it again. **Read what it tells you.** It confirms the process actually ended; when it could not, it says so and the job is still running. Never report something as stopped on the strength of having called kill — on Windows in particular, a tree can survive it and keep holding its port.
 
-Subagents: when you judge one will not be needed again, kill it; otherwise suspend it.
 
 Jobs are named after what they are: "npm run dev" becomes "dev", "cargo watch -x run" becomes "watch", a subagent auditing the auth flow becomes "audit". Use that name as the id; names are never reused, even after a job finishes. A job that ended is still listed, with its exit code — "not found" and "failed" are different answers.
 
-Do NOT sit in a loop of reads waiting for a subagent to finish. Nothing in this tool blocks for a subagent, and its answer is delivered to you on its own the moment it is done. When the user asks what one is doing, "list" already answers it: read it once, say it in a line, and stop — every read is a step in which you are not talking to the user, who is still there and can send you something at any moment. When reading a subagent's output is worth it at all is in the \`alfa-subagents\` skill.
+Do NOT sit in a loop of reads waiting for a subagent to finish. Nothing in this tool blocks for a subagent, and its answer is delivered to you on its own the moment it is done. When the user asks what one is doing, "list" already answers it: read it once, say it in a line, and stop — every read is a step in which you are not talking to the user, who is still there and can send you something at any moment. Read a subagent's output only when the user asks how one is going, or to see whether one taking very long is still moving.
 
 Stop the jobs you started once you no longer need them. Everything left running is stopped when the session ends, but a forgotten dev server holds its port for the rest of the session.`
 
@@ -106,35 +104,14 @@ export const JobTool: ToolDef<Args> = {
     // way around
     if (!agents && !ownedBy(id, ctx.owner)) throw new UnknownJobError(id)
 
-    // ── suspend vs kill: the model's words are the user's ──
-    // suspend = stop it but keep it (its memory stays, task resume wakes it); kill = it
-    // won't be needed again (stopped if working, then removed for good). There used to
-    // be only kill, which meant suspend: a live run "killed" three suspended subagents
-    // the user wanted gone, got "Stopped" back each time, and they stayed listed.
-    if (args.action === "suspend") {
-      if (!agents) throw new Error(`"${id}" is a process; only subagents can be suspended. Use "kill" to stop a process.`)
-      if (agents.list().find((job) => job.id === id)?.status === "exited") {
-        return {
-          output: `${id} has already stopped — it is suspended, keeping its memory so task resume can wake it. Nothing was changed.`,
-          title: `${id} already suspended`,
-          metadata: { truncated: false, job: id, suspended: true },
-        }
-      }
-      const result = await agents.suspend(id)
-      const stopped = result.job.status === "exited"
-      ctx.metadata({ job: id, suspended: stopped })
-      const head = stopped
-        ? `Suspended ${id}: it has stopped and keeps its memory; task resume can wake it.`
-        : `Could NOT stop ${id}${result.detail ? ` — ${result.detail}` : ""}. It is still running. Do not report it as suspended.`
-      return {
-        output: [head, tailBlock(result.output)].join("\n\n"),
-        title: stopped ? `${id} suspended` : `${id} still running`,
-        metadata: { truncated: false, job: id, suspended: stopped },
-      }
-    }
-
+    // ── kill on a subagent stops its work, nothing more ──
+    // There used to be suspend (stop, keep) and kill (stop, remove for good), the second
+    // made so finished subagents could be cleared out of the pinned row and the list. The
+    // pinned row now shows only working ones, and a message wakes a finished one, so
+    // removal no longer earns a word in the model's vocabulary (see the header of
+    // agent/subagent.ts).
     if (args.action === "kill") {
-      const agentResult = agents ? await agents.kill(id) : undefined
+      const agentResult = agents ? await agents.suspend(id) : undefined
       const result = agentResult ?? await kill(id)
       // ★ "Stopped" must not be reported unconditionally.
       //
@@ -147,11 +124,7 @@ export const JobTool: ToolDef<Args> = {
       const stopped = result.job.status === "exited"
       ctx.metadata({ job: id, killed: stopped })
       const why = result.detail
-      const gone = agentResult
-        ? agentResult.removed
-          ? " It is removed for good: gone from the list, and it can't be resumed."
-          : " It will be removed for good the moment it ends."
-        : ""
+      const gone = agentResult ? " It keeps its conversation; a message to it wakes it again." : ""
       const head = stopped
         ? why
           ? `Stopped ${id} — but: ${why}. Check for yourself before you rely on it (is the port free? is the process gone?).${gone}`
@@ -260,9 +233,9 @@ function describe(job: JobSnapshot): string {
     return `${job.id}  running ${ran}${pending}${doing}  ${what}`
   }
   const how = job.signal ? `stopped by ${job.signal}` : `exit ${job.exit ?? "?"}`
-  // A finished subagent is suspended, not gone: say so where the model looks, or "finished"
-  // reads as "used up" and it dispatches a blank one to redo the background it already has
-  if (job.kind === "agent") return `${job.id}  suspended after ${ran} (${how}, ${job.steps ?? 0} steps; task resume:"${job.id}" wakes it with its memory)  ${what}`
+  // A finished subagent is not gone: say so where the model looks, or "finished" reads as
+  // "used up" and it dispatches a blank one to redo the background it already has
+  if (job.kind === "agent") return `${job.id}  finished after ${ran} (${how}, ${job.steps ?? 0} steps; a message to "${job.id}" wakes it with its memory)  ${what}`
   return `${job.id}  finished after ${ran} (${how})  ${what}`
 }
 

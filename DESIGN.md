@@ -5105,6 +5105,54 @@ permission mode, auto included.
 Existing explicit settings are preserved; the current user's installation was separately
 set to off at their request. Filesystem authorization and tool approval remain independent.
 
+### Subagent guidance lives in the task description again
+
+The `alfa-subagents` built-in skill is folded back into `task`'s description, condensed,
+and removed. The description ended with "open the skill first" for chaining, resume,
+setup and writers, which is nearly every real dispatch, so the model opened it every time
+and announced it doing so. A skill only saves anything when most uses never open it; this
+one was opened on every use, and most of it was behavior shaping a skill can't carry.
+Resume is now described as the ordinary way to keep working with a subagent: the bolded
+"every further round re-sends that whole conversation" made the model warn about token
+cost whenever the user asked to continue with one, though re-sending history is what
+every turn does, mostly at the cached rate. The asymmetry: about 1k characters in the
+main agent's cached prefix (subagents don't carry task) against an extra step and a
+spurious warning on every dispatch.
+
+### Agents message each other; a subagent is a session the user doesn't drive
+
+A `message` tool now carries text between live agents: the main agent to its subagents
+(by name or session id), a subagent to "main", and one alfa session to another on the
+same machine. Before it, only a brief went down and a final report came up: a subagent
+going the wrong way could only be stopped, one unsure of the brief had to guess, and
+two sessions could not see each other. The model is Claude Code's.
+
+- A message to a working subagent is appended to its session and read at its next step;
+  one landing after the loop's last check makes the scheduler run the loop again rather
+  than end on an unanswered message. A message to a finished one wakes it, so `task`
+  lost `resume`: two ways to say "talk to that one" made the model choose.
+- A subagent's question pauses **inside** the tool call (`wait`) until the main agent
+  answers. Ending its turn to wait would have finished it, and its last text would have
+  gone up as the report.
+- Subagent states are now queued, running and finished. "Removed" (`job kill`) existed
+  only so the pinned row could drop finished ones; the row now shows working ones only,
+  and `job kill` stops a subagent's work without losing its conversation. Only the trust
+  review is still discarded, and it may not message the main agent: its report is
+  enveloped as untrusted, and a message would be a door around that.
+- Between sessions, a `presence` table (one row per process, 5 s heartbeat) and a
+  `mailbox` table in the shared sessions.db; each interactive process polls once a
+  second. Taking mail is one transaction, so two processes on one session never both
+  deliver it.
+
+The criterion: another agent's words never count as the user's. Every route arrives as
+a synthetic message, which the auto classifier's evidence skips; cross-session messages
+are also enveloped as untrusted, with a closing that allows acting on a request only when
+it fits the user's own task — "report it, do not act on it" would forbid the cooperation
+messages exist for. The asymmetry: a wrong "trusted" lets one agent approve operations
+for another's user, while a wrong "untrusted" costs a question to the user. There is no
+cap on back-and-forth; the description asks for purposeful exchanges, by the user's
+choice.
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).

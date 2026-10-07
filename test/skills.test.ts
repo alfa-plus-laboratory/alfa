@@ -243,7 +243,6 @@ describe("built-in list", () => {
       "alfa-mcp",
       "alfa-permissions",
       "alfa-skills",
-      "alfa-subagents",
     ])
     for (const one of set.skills) expect(one.origin).toBe("builtin")
   })

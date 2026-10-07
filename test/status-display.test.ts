@@ -1,7 +1,7 @@
 /**
  * The status the live area shows while and between turns: the running line (alfa mark,
  * phase, clock, thinking tail), the footer (context bar, actual cache hit rate, speed),
- * the pinned rows (plan, subagents incl. suspended ones, background jobs) and the tips
+ * the pinned rows (plan, working subagents, background jobs) and the tips
  * in the empty input box.
  *
  * Most of these fail silently when broken — a timer that outlives the turn burns CPU
@@ -302,29 +302,25 @@ describe("pinned rows", () => {
     expect(planRow([], 80)).toBeUndefined()
   })
 
-  test("★ suspended subagents stay listed — they can still be woken, so they aren't closed", () => {
+  // ★ Finished ones keep their session and a message wakes them, but they aren't working;
+  //   keeping them in the row is what once made a "remove" kill necessary
+  test("★ only working subagents get a row; finished ones are left to /agents", () => {
     const rows = agentRows([job({ id: "audit", status: "exited", exit: 0, endedAt: 5 }), job({ id: "parser", activity: "read src/x.ts" })], 80).map(stripAnsi)
-    expect(rows[0]).toBe("  agents ◌● 1 running · 1 suspended")
-    expect(rows[1]).toBe("    ● parser · read src/x.ts")
-    expect(rows[2]).toBe("    ◌ suspended: audit")
+    expect(rows).toEqual(["  agents ● 1 running", "    ● parser · read src/x.ts"])
+    expect(agentRows([job({ id: "audit", status: "exited", exit: 1 })], 80)).toEqual([])
   })
 
-  test("a user-stopped one isn't a failure; a crashed one is", () => {
-    const rows = agentRows([job({ id: "a", status: "exited", exit: 1, signal: "SIGTERM" }), job({ id: "b", status: "exited", exit: 1 })], 80).map(stripAnsi)
-    expect(rows[0]).toBe("  agents ◌✗ 2 suspended · 1 failed")
-  })
-
-  test("★ a hundred agents still fit one row, and a lone failure keeps its cell", () => {
+  test("★ a hundred agents still fit one row, and a few queued keep their cell", () => {
     const many = [
-      ...Array.from({ length: 80 }, (_, i) => job({ id: `s${i}`, status: "exited", exit: 0 })),
-      job({ id: "bad", status: "exited", exit: 1 }),
-      ...Array.from({ length: 19 }, (_, i) => job({ id: `r${i}` })),
+      ...Array.from({ length: 98 }, (_, i) => job({ id: `r${i}` })),
+      job({ id: "q1", status: "queued" }),
+      job({ id: "q2", status: "queued" }),
     ]
     const summary = stripAnsi(agentRows(many, 200)[0]!)
     const strip = summary.split(" ")[3]!
     expect([...strip].length).toBe(24)
-    expect(strip).toContain("✗")
-    expect(summary).toContain("19 running · 81 suspended · 1 failed")
+    expect(strip).toContain("○")
+    expect(summary).toContain("98 running · 2 queued")
   })
 
   test("no subagents, no row", () => {

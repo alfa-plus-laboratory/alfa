@@ -20,9 +20,12 @@
  *   two are kept apart by session_id. SQLite itself (WAL + busy_timeout) takes care of
  *   serializing concurrent writes.
  *
- *   What really needs care is **two writers on the same session**: the day we build
- *   something like "two agents relaying the same conversation", this comment has to be
- *   worked out again.
+ *   What really needs care is **two writers on the same session**. Two exist now, both
+ *   appending a user message while that session's loop runs: the user typing mid-turn
+ *   (cli/main.ts injectUser) and the main agent messaging a working subagent
+ *   (SubagentJobs.message). Both hold because the loop only reads at step boundaries and
+ *   an append is one message written in one tick; anything that edits or reorders
+ *   another writer's messages would need this worked out again.
  */
 import { Database } from "bun:sqlite"
 
@@ -76,6 +79,29 @@ CREATE INDEX IF NOT EXISTS part_message_idx ON part(message_id, time_created, id
 CREATE INDEX IF NOT EXISTS part_session_idx ON part(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS part_toolcall_idx
   ON part(message_id, tool_call_id) WHERE tool_call_id IS NOT NULL;
+
+-- Sessions open right now in some alfa process on this machine, for messaging between
+-- them (tool/message.ts). One row per process: switching session (/clear, /resume)
+-- replaces it. A row whose heartbeat stopped is a process that died without cleaning up
+CREATE TABLE IF NOT EXISTS presence (
+  pid           INTEGER PRIMARY KEY,
+  session_id    TEXT    NOT NULL,
+  directory     TEXT    NOT NULL,
+  time_seen     INTEGER NOT NULL
+) STRICT;
+
+-- Messages from one session to another, waiting to be picked up. A row is deleted as it
+-- is delivered, so this table only ever holds what nobody has read yet
+CREATE TABLE IF NOT EXISTS mailbox (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  to_session     TEXT    NOT NULL,
+  from_session   TEXT    NOT NULL,
+  from_directory TEXT    NOT NULL,
+  text           TEXT    NOT NULL,
+  time_created   INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS mailbox_to_idx ON mailbox(to_session, id);
 `
 
 /**
@@ -121,6 +147,23 @@ export interface HistorySweep {
   /** When the oldest/newest one was last active. Absent for an empty list */
   oldest?: number
   newest?: number
+}
+
+/** A session open in some alfa process right now. See the presence table */
+export interface Peer {
+  sessionID: string
+  pid: number
+  directory: string
+  title: string
+  timeSeen: number
+}
+
+/** A message from another session, taken out of the mailbox */
+export interface Mail {
+  from: string
+  fromDirectory: string
+  text: string
+  timeCreated: number
 }
 
 export class Store {
@@ -464,6 +507,70 @@ export class Store {
     if (!row) return ""
     const part = PartSchema.parse(JSON.parse(row.data))
     return part.type === "text" ? part.text : ""
+  }
+
+  // ───────────────────────────────────────────── presence and mailbox
+
+  /**
+   * This process now has `sessionID` open. Called again as a heartbeat; see peers().
+   *
+   * ⚠ Keyed by pid, not session: a /clear swaps the session under the same process, and a
+   *   row per session would leave the old one looking alive until its heartbeat aged out.
+   */
+  announce(pid: number, sessionID: string, directory: string): void {
+    this.db
+      .query(
+        `INSERT INTO presence (pid, session_id, directory, time_seen) VALUES ($pid, $sessionID, $directory, $now)
+         ON CONFLICT(pid) DO UPDATE SET session_id = $sessionID, directory = $directory, time_seen = $now`,
+      )
+      .run({ pid, sessionID, directory, now: Date.now() })
+  }
+
+  withdraw(pid: number): void {
+    this.db.query(`DELETE FROM presence WHERE pid = $pid`).run({ pid })
+  }
+
+  /**
+   * Sessions whose process announced itself within the last `freshMs`. Rows older than
+   * that are dead processes, deleted on the way so the table doesn't grow.
+   */
+  peers(freshMs: number): Peer[] {
+    const since = Date.now() - freshMs
+    this.db.query(`DELETE FROM presence WHERE time_seen < $since`).run({ since })
+    return (
+      this.db
+        .query(
+          `SELECT p.pid, p.session_id, p.directory, p.time_seen, COALESCE(s.title, '') AS title
+           FROM presence p LEFT JOIN session s ON s.id = p.session_id
+           ORDER BY p.time_seen DESC`,
+        )
+        .all() as Array<{ pid: number; session_id: string; directory: string; time_seen: number; title: string }>
+    ).map((row) => ({ sessionID: row.session_id, pid: row.pid, directory: row.directory, title: row.title, timeSeen: row.time_seen }))
+  }
+
+  post(mail: { to: string; from: string; fromDirectory: string; text: string }): void {
+    this.db
+      .query(
+        `INSERT INTO mailbox (to_session, from_session, from_directory, text, time_created)
+         VALUES ($to, $from, $fromDirectory, $text, $now)`,
+      )
+      .run({ ...mail, now: Date.now() })
+  }
+
+  /**
+   * Everything waiting for `sessionID`, oldest first, removed as it is taken.
+   *
+   * ★ Read and delete in one transaction: two processes can have the same session open
+   *   (two terminals on one --continue), and each message must land in exactly one.
+   */
+  takeMail(sessionID: string): Mail[] {
+    return this.db.transaction(() => {
+      const rows = this.db
+        .query(`SELECT id, from_session, from_directory, text, time_created FROM mailbox WHERE to_session = $sessionID ORDER BY id`)
+        .all({ sessionID }) as Array<{ id: number; from_session: string; from_directory: string; text: string; time_created: number }>
+      if (rows.length > 0) this.db.query(`DELETE FROM mailbox WHERE to_session = $sessionID AND id <= $last`).run({ sessionID, last: rows.at(-1)!.id })
+      return rows.map((row) => ({ from: row.from_session, fromDirectory: row.from_directory, text: row.text, timeCreated: row.time_created }))
+    })()
   }
 
   // ───────────────────────────────────────────── message

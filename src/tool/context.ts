@@ -25,6 +25,8 @@ export interface ToolContextDeps {
    * agent/subagent.ts
    */
   agents?: AgentJobs
+  /** See ToolContext.messenger */
+  messenger?: import("./message.ts").Messenger
   /** If this path belongs to a subagent, its name. See ToolContext.owner */
   owner?: string
   onProgress(callID: string, text: string): void
@@ -64,6 +66,7 @@ export function createToolContext(
       ? { inquire: (question: Question) => deps.inquire!({ ...question, callID: call.callID }) }
       : {}),
     ...(deps.agents ? { agents: deps.agents } : {}),
+    ...(deps.messenger ? { messenger: deps.messenger } : {}),
     ...(deps.skills ? { skills: deps.skills } : {}),
     ...(deps.owner ? { owner: deps.owner } : {}),
   }
