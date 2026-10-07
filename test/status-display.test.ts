@@ -137,6 +137,22 @@ describe("activity: token speed", () => {
     expect(a.speed(1010)?.rate).toBe(100)
   })
 
+  // ★ The step's end comes only after its tools have run; counting that made the rate dive
+  //   for as long as a bash ran
+  test("★ a tool's run time is not writing time: the window ends where the model stopped", () => {
+    const a = new Activity()
+    a.begin(0)
+    a.handle({ type: "part.start", part: stepStart() }, 0)
+    a.handle({ type: "part.delta", part: textPart("t"), delta: "word ".repeat(200) }, 1000)
+    a.handle({ type: "tool.state", part: tool("c", "bash", "running") }, 3000)
+    const live = a.speed(3000)!.rate
+    // twenty seconds of bash later the live estimate has not moved
+    expect(a.speed(23_000)!.rate).toBe(live)
+    a.handle({ type: "tool.state", part: tool("c", "bash", "completed") }, 23_000)
+    a.handle({ type: "step.finish", part: stepFinish(400) }, 23_100)
+    expect(a.speed(23_100)).toEqual({ rate: 200, estimated: false })
+  })
+
   test("while streaming it is a marked estimate", () => {
     const a = new Activity()
     a.begin(0)

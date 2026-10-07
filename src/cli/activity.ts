@@ -24,10 +24,17 @@
  * Every frame is exactly three columns so the label after it never jitters.
  *
  * ── Token speed ──
- * Measured per step, from the first streamed output to the step's end: prompt processing
- * before the first token is latency, not writing speed. While a step streams, the rate
- * is estimated from the visible characters and marked `~`; at the step's end it is
- * replaced by the provider's output count. ⚠ When the provider reports reasoning tokens
+ * Measured per step, from the first streamed output to the last: prompt processing
+ * before the first token is latency, not writing speed, and tool execution after the last
+ * is the tool's time, not the model's. ★ The window used to end at the step's end, which
+ * comes only after the step's tools have run, so a 20 s bash divided the step's tokens
+ * by 20 s more and the rate dived while it ran. In a step that calls a tool the window now
+ * ends at the model's last output — the last streamed delta or the last tool call whose
+ * input finished (tool.state running) — and the live estimate holds there instead of
+ * decaying. A step without tools still ends at its end: the last delta can be a while
+ * before the stream closes, and that wait is still the model's. While a step streams, the rate is
+ * estimated from the visible characters and marked `~`; at the step's end it is replaced
+ * by the provider's output count. ⚠ When the provider reports reasoning tokens
  * but streamed no reasoning, that reasoning was generated before the first visible token,
  * so it is taken out of the numerator — otherwise hidden thinking inflates the rate
  * several times over.
@@ -62,6 +69,10 @@ export class Activity {
   private thought: { id: string; text: string } | undefined
   /** When this step's first output streamed; undefined until it has */
   private firstOutput: number | undefined
+  /** When the model last produced something in this step */
+  private lastOutput: number | undefined
+  /** A tool started in this step: from here on the clock also runs tools, see windowEnd */
+  private toolRan = false
   private streamedChars = ""
   private sawReasoning = false
   private measured: number | undefined
@@ -112,7 +123,7 @@ export class Activity {
    */
   speed(now = Date.now()): { rate: number; estimated: boolean } | undefined {
     if (this.firstOutput !== undefined && this.streamedChars.length > 0) {
-      const ms = now - this.firstOutput
+      const ms = this.windowEnd(now) - this.firstOutput
       const tokens = estimateTokens(this.streamedChars)
       if (ms >= MIN_RATE_MS * 2 && tokens >= MIN_RATE_TOKENS) return { rate: tokens / (ms / 1000), estimated: true }
     }
@@ -165,6 +176,9 @@ export class Activity {
       case "tool.state": {
         const part = event.part
         if (part.state.status === "running") {
+          // Its input has finished streaming: that much the model wrote, the rest is execution
+          this.markOutput(now)
+          this.toolRan = true
           this.tools.set(part.callID, part.tool)
           this.thought = undefined
           this.setPhase({ kind: "tool", name: part.tool })
@@ -178,7 +192,7 @@ export class Activity {
         const { output, reasoning } = event.part.tokens
         if (this.firstOutput !== undefined) {
           const visible = this.sawReasoning ? output : Math.max(0, output - (reasoning ?? 0))
-          const ms = now - this.firstOutput
+          const ms = this.windowEnd(now) - this.firstOutput
           if (ms >= MIN_RATE_MS && visible >= MIN_RATE_TOKENS) this.measured = visible / (ms / 1000)
         }
         this.resetStep()
@@ -199,12 +213,20 @@ export class Activity {
     return names.length ? { kind: "tool", name: names[names.length - 1]! } : undefined
   }
 
+  /** Where this step's speed window ends: see the ★ on token speed in the file header */
+  private windowEnd(now: number): number {
+    return this.toolRan ? (this.lastOutput ?? now) : now
+  }
+
   private markOutput(now: number): void {
     this.firstOutput ??= now
+    this.lastOutput = now
   }
 
   private resetStep(): void {
     this.firstOutput = undefined
+    this.lastOutput = undefined
+    this.toolRan = false
     this.streamedChars = ""
     this.sawReasoning = false
   }
