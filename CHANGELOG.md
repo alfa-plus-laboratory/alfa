@@ -2,6 +2,25 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.18.0
+
+**The plan row says which step is running, and a plan the model forgets to update gets
+a nudge.**
+
+- The pinned plan row now numbers the step in progress: working on step 1 shows `1/6`,
+  not `0/6`. The bar counts finished steps plus half of the current one, so it moves as
+  soon as a step starts and is never full before the last one is done.
+- When the main agent's plan has unfinished steps and eight tool calls pass without an
+  update, it gets a short reminder to tick off what it finished. You don't see the
+  reminder; you see a plan that keeps up.
+- The plan row updates the moment the model changes it, also with the animation off.
+- A long think is worded differently on the running line: `thinking`, then `still
+  thinking`, `thinking it through`, `deep in thought`, `working through it`.
+- With thinking shown in full, the first words after a line break are no longer bright.
+- The Google Programmable Search backend is removed: Google closed its Custom Search API
+  to new customers and shuts it down on 2027-01-01. Searching uses Brave or Tavily when
+  their key is set, DuckDuckGo otherwise; `websearch` no longer takes `page`.
+
 ## 0.17.0
 
 **A question can come with the model's own pick, and agents keep talking to each other
