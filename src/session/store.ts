@@ -166,6 +166,14 @@ export interface Mail {
   timeCreated: number
 }
 
+/** Retries of the setup when another process holds the fresh database. See the constructor */
+const SETUP_ATTEMPTS = 50
+
+function isBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED" || /database is locked/i.test(String((error as Error)?.message ?? ""))
+}
+
 export class Store {
   private db: Database
   /**
@@ -184,11 +192,24 @@ export class Store {
     //   together, or both polling the mailbox, see tool/message.ts) made the second one
     //   fail with "database is locked" instead of waiting its turn
     this.db.exec("PRAGMA busy_timeout = 5000")
-    this.db.exec("PRAGMA journal_mode = WAL")
-    this.db.exec("PRAGMA synchronous = NORMAL")
-    this.db.exec("PRAGMA foreign_keys = ON")
-    this.db.exec(DDL)
-    this.migrate()
+    // ★ busy_timeout alone was not enough. Two processes setting up a *fresh* database
+    //   both take a read lock and then want to write (the WAL switch, the DDL); SQLite
+    //   sees that neither can wait for the other and returns SQLITE_BUSY at once, without
+    //   calling the busy handler. It showed up as an occasional macOS CI failure of the
+    //   two-process test. The setup is idempotent, so the loser just tries again.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        this.db.exec("PRAGMA journal_mode = WAL")
+        this.db.exec("PRAGMA synchronous = NORMAL")
+        this.db.exec("PRAGMA foreign_keys = ON")
+        this.db.exec(DDL)
+        this.migrate()
+        break
+      } catch (error) {
+        if (attempt >= SETUP_ATTEMPTS || !isBusy(error)) throw error
+        Bun.sleepSync(5 + Math.floor(Math.random() * 20))
+      }
+    }
   }
 
   /**
