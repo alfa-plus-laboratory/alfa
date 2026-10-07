@@ -130,7 +130,13 @@ export class Renderer {
         // Thinking doesn't go through markdown: it's the model's scratch draft, not very
         // coherent to begin with, and rendering half headings and empty lists only makes
         // it harder to read. Dimming the whole stretch is enough.
-        else if (event.part.type === "reasoning" && this.reasoning === "full") this.write(theme.dim(event.delta))
+        // ★ Dimmed line by line, not the delta as one piece. A delta like "…right?\n\nHmm
+        //   wait" put its one dim code on the earlier line; the half line after the break
+        //   carried none, the live area redrew it at full brightness every frame, and it was
+        //   committed that way — the first words of a paragraph came out bright.
+        else if (event.part.type === "reasoning" && this.reasoning === "full") {
+          this.write(event.delta.split("\n").map((line) => (line.length > 0 ? theme.dim(line) : line)).join("\n"))
+        }
         break
 
       case "part.end":

@@ -264,6 +264,23 @@ describe("Renderer", () => {
     expect(out.text()).toBe("secret thought")
   })
 
+  // ★ One dim code per delta landed on the line before a break; the words after it were
+  //   drawn and committed at full brightness
+  test("★ full reasoning dims every line of a delta on its own, so text after a line break stays dim", () => {
+    const part = { id: "p", sessionID: "s", messageID: "m", timeCreated: 1, type: "reasoning", text: "" } as const
+    setColorEnabled(true)
+    try {
+      const out = textSink()
+      new Renderer({ sink: out, showReasoning: true }).handle({ type: "part.delta", part, delta: "right?\n\nHmm wait" })
+      const lines = out.text().split("\n")
+      expect(lines).toHaveLength(3)
+      expect(lines[0]).toStartWith("\u001b[2m")
+      expect(lines[1]).toBe("")
+      expect(lines[2]).toStartWith("\u001b[2m")
+      expect(lines[2]).toContain("Hmm wait")
+    } finally { setColorEnabled(false) }
+  })
+
   test("★ several answered questions each get a row — the card that asked them is gone once answered", () => {
     const asked = (entries: Array<{ question: string; kind: string; answer: string }>) => toolPart({
       status: "completed", input: {}, output: "The user answered", time: { start: 1, end: 2 },
