@@ -5153,6 +5153,16 @@ for another's user, while a wrong "untrusted" costs a question to the user. Ther
 cap on back-and-forth; the description asks for purposeful exchanges, by the user's
 choice.
 
+### The status panel sits under the input box
+
+Plan, working subagents and background jobs moved from above the running line to under
+the input box, beside the footer, each row behind a label padded to one column. Above
+the running line they split the reply from "what it is doing now" and pushed the
+running line away from the box it is about. Up to three working subagents are listed
+one per row; only past three does the summary strip appear. The old four-row budget gave
+three agents a summary, one name and "+2 more", hiding two of three. The budget is now
+up to six rows on a tall terminal; detail gives way first, then jobs, never the agents row.
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).
