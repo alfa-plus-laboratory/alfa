@@ -214,6 +214,11 @@ export interface ToolContext {
    *   the `task` tool says so plainly.
    */
   agents?: AgentJobs
+  /**
+   * Where `message` sends to (see tool/message.ts). Wired per caller: the main agent
+   * reaches its subagents and other live sessions, a subagent reaches only "main".
+   */
+  messenger?: import("./message.ts").Messenger
   /** Push intermediate progress to the UI (never enters the model's context). */
   onProgress(text: string): void
   /** Accumulate into this call's metadata; visible to both the UI and storage. */

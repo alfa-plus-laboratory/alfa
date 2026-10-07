@@ -34,6 +34,8 @@ export interface JobSnapshot {
   kind: JobKind
   /** For a process, the command text; for a subagent, the first line of its brief */
   command: string
+  /** A subagent's own session id: what other agents can address it by (tool/message.ts) */
+  sessionID?: string
   /**
    * **Who started** this background process (the subagent's name); ones started by the
    * main agent itself don't have this.
@@ -193,39 +195,15 @@ export interface AgentSetup {
  */
 export interface AgentJobs {
   start(input: StartAgentInput): Promise<JobSnapshot>
-  /**
-   * Wake up a subagent that has **already finished** and hand it one more instruction.
-   *
-   * ── Why it shouldn't have an expiry ──
-   * That session sits complete in the database (see parent_id in agent/subagent.ts);
-   * waking it costs only one more run of the loop — and it still holds everything it read
-   * last round. Giving it a "gone cold after ten minutes" rule would be pure
-   * implementation laziness: the user occasionally really does need to follow up with that
-   * one, and then the only alternative is dispatching a blank one and explaining the
-   * background all over again.
-   *
-   * ★ But **no expiry does not mean it crosses sessions**: only ones **dispatched by this
-   *   session itself** can be woken. After `/clear` it is a brand-new conversation, and
-   *   the previous one's subagents simply don't exist for it (see owns).
-   *
-   * One that is still running can't be woken (it is busy, and its answer will come back
-   * on its own anyway), nor can an unknown name.
-   */
-  resume(id: string, prompt: string): Promise<JobSnapshot>
   list(): JobSnapshot[]
   has(id: string): boolean
   read(id: string, waitMs: number, reader?: JobReader): Promise<JobReadResult>
   /**
-   * Stop it but keep it: a suspended subagent keeps its whole session and `resume` wakes
-   * it. One that finishes on its own ends up in the same state.
+   * Stop its current work but keep it: it keeps its whole session, and a message wakes it
+   * (tool/message.ts). One that finishes on its own ends up in the same state. There is no
+   * "remove" for the model — see the header of agent/subagent.ts.
    */
   suspend(id: string, reader?: JobReader): Promise<JobReadResult>
-  /**
-   * Done with it for good: stop it if it's still working, then remove it — gone from
-   * list, output unreadable, never wakeable. `removed` is false when it was still winding
-   * down after the wait; it is removed the moment it exits.
-   */
-  kill(id: string, reader?: JobReader): Promise<JobReadResult & { removed: boolean }>
   /**
    * The final text it handed in, **without the lines from its working process**.
    * undefined if it hasn't finished yet.

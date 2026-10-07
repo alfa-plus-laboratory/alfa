@@ -13,6 +13,10 @@
  *   safety / untrusted / plan / agentflow sections stay in system not because nobody
  *   measured them, but because the model won't go and open a skill that constrains it
  *   of its own accord — loading them on demand would amount to switching them off.
+ *   An `alfa-subagents` skill failed the other way: the task description had to say
+ *   "open it first", that covered nearly every dispatch, so it was read every time anyway
+ *   at the price of an extra step. Knowledge needed every time the tool is used belongs
+ *   in that tool's description (see the top of tool/task.ts).
  *
  * ── Why the body is a .md file and not a string here ──
  * Built-in skills and user-written ones must be the same kind of thing: the same
@@ -28,7 +32,6 @@ import alfaConfig from "./skills/alfa-config.md" with { type: "text" }
 import alfaMcp from "./skills/alfa-mcp.md" with { type: "text" }
 import alfaPermissions from "./skills/alfa-permissions.md" with { type: "text" }
 import alfaSkills from "./skills/alfa-skills.md" with { type: "text" }
-import alfaSubagents from "./skills/alfa-subagents.md" with { type: "text" }
 
 export function builtinSkills(): BuiltinSkill[] {
   return [
@@ -44,13 +47,5 @@ export function builtinSkills(): BuiltinSkill[] {
     // — and a wrong guess shows up as that skill **never appearing at all** (no
     // description, not picked up), leaving the user with nothing but "but I did write it"
     { text: alfaSkills, source: "built in (skills/alfa-skills.md)" },
-    // This one isn't "how alfa works"; it's the half **moved out of task's description**:
-    // the mechanics of chained orchestration, the bookkeeping of resume, what happens when
-    // two of them write the same file. The test for whether it could move: the parameter
-    // descriptions already say what each thing is (the describe for `after` / `resume` is
-    // always loaded), and that part of the description only said it again in other words
-    // — while "how to use it well" only matters in the few turns where a whole team is
-    // actually being sent out
-    { text: alfaSubagents, source: "built in (skills/alfa-subagents.md)" },
   ]
 }
