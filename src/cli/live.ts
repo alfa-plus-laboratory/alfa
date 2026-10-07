@@ -27,9 +27,14 @@
  * one empty column on the right, which nobody can tell.
  *
  * ★ Resize invalidates the row ledger before any further erase. The terminal has
- * already reflowed those rows; an old cursor-up can erase committed output or leave
- * permanent ghosts. Reset only the viewport, retaining scrollback and the pending
- * streamed tail, then ask the owner to lay out a fresh frame.
+ * already reflowed those rows at the new width, so the old cursor-up count is wrong in
+ * both directions: too few leaves ghosts, too many eats committed output. The erase is
+ * recomputed for the reflowed layout (see reflowedErase), only the live area is cleared,
+ * and the owner lays out a fresh frame. Tried before and reverted: clearing the viewport
+ * (ESC[H ESC[2J). It needed no row arithmetic, but it moved the input box to the top of
+ * an empty screen, and macOS Terminal and iTerm2 push the cleared screen into scrollback —
+ * every resize event of a window drag stacked one more copy of the old, reflowed frame
+ * there, so scrolling up showed layers of garbled frames.
  */
 import { displayWidth, truncateToWidth, wrapToWidth } from "./width.ts"
 
@@ -91,12 +96,18 @@ export interface LiveRegionOptions {
    * everything out again at the new width, so this has to call back out.
    */
   onResize?(): void
+  /**
+   * Does this terminal reflow wrapped lines when it narrows? Default: detected — xterm and
+   * st truncate instead, nearly everything else reflows. See reflowedErase.
+   */
+  reflows?: boolean
 }
 
 export class LiveRegion {
   private readonly output: NodeJS.WriteStream
   private readonly enabled: boolean
   private readonly notifyResize: (() => void) | undefined
+  private readonly reflows: boolean
 
   /** Live-area content from the caller (already wrapped to width by the caller) */
   private overlayFrame?: (width: number, height: number) => { lines: string[]; cursor?: LiveCursor }
@@ -119,6 +130,7 @@ export class LiveRegion {
     this.output = options.output ?? process.stdout
     this.enabled = options.enabled ?? (this.output.isTTY === true)
     this.notifyResize = options.onResize
+    this.reflows = options.reflows ?? terminalReflows()
     if (this.enabled) this.output.on("resize", this.onResize)
   }
 
@@ -438,13 +450,41 @@ export class LiveRegion {
   private flushResize(): void {
     if (!this.active || !this.resizePending) return
     this.resizePending = false
+    const erase = this.reflowedErase()
     this.painted = []
     this.cursorRow = 0
     this.cursorCol = 0
-    // ED 2 clears the viewport; ED 3 would destroy native scrollback. passthrough()
-    // cannot be used here because it erases using the old ledger and drops pending.
-    this.output.write(SYNC_BEGIN + HIDE_CURSOR + "\u001b[H\u001b[2J" + SHOW_CURSOR + SYNC_END)
+    // ⚠ Never ED 2/3 here: see the ★ on resize in the file header. passthrough() can't be
+    //   used either — it erases by the stale ledger and drops pending.
+    if (erase.length > 0) this.output.write(SYNC_BEGIN + HIDE_CURSOR + erase + SHOW_CURSOR + SYNC_END)
     this.notifyResize?.()
+  }
+
+  /**
+   * The erase for the frame on screen after the terminal changed width.
+   *
+   * Every painted row was one logical line narrower than the old width. A reflowing
+   * terminal re-wraps each at the new width — ceil(width / columns) rows — and carries the
+   * cursor along its own line, so the distance from the cursor up to the frame's first
+   * row is those rows summed above the cursor plus the wrapped rows before the cursor's
+   * column. Widening needs no special case: nothing of ours was soft-wrapped, so every
+   * line stays one row. A terminal that truncates instead keeps one row per line.
+   * ⚠ Overshooting erases committed output still on screen and undershooting leaves a
+   *   ghost frame; both are permanent, which is why the two terminal kinds are told apart.
+   * ⚠ Checked against xterm.js 5.5 (VS Code's terminal): it carries the cursor along its
+   *   line too, except when the screen is full and lines *below* the cursor also wrap —
+   *   then its cursor lands that many rows low and one narrowing step can leave a row of
+   *   the old frame behind. Counting those rows as well would overshoot on terminals that
+   *   track the cursor exactly, which is where most people are.
+   */
+  private reflowedErase(): string {
+    if (this.painted.length === 0) return ""
+    const columns = this.columns
+    const rowsOf = (line: string) => this.reflows ? Math.max(1, Math.ceil(displayWidth(line) / columns)) : 1
+    let up = 0
+    for (let row = 0; row < this.cursorRow; row++) up += rowsOf(this.painted[row] ?? "")
+    if (this.reflows) up += Math.floor(this.cursorCol / columns)
+    return "\r" + (up > 0 ? `\u001b[${up}A` : "") + CLEAR_DOWN
   }
 }
 
@@ -460,4 +500,15 @@ function sameLines(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+/**
+ * xterm and st cut a line at the right edge when the window narrows; the terminals
+ * people mostly use (macOS Terminal, iTerm2, kitty, WezTerm, Alacritty, GNOME/Konsole,
+ * Windows Terminal, tmux) re-wrap it. Both tell on themselves in the environment.
+ */
+function terminalReflows(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env["TMUX"]) return true
+  if (env["XTERM_VERSION"]) return false
+  return !/^st(-|$)/.test(env["TERM"] ?? "")
 }

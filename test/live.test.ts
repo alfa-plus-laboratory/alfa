@@ -270,10 +270,13 @@ describe("live area", () => {
     expect(term.chunks.length).toBeGreaterThan(0)
   })
 
-  test("resize resets the viewport before relayout without erasing by stale rows or clearing scrollback", async () => {
+  // ★ The old fix cleared the viewport: the input box jumped to the top of an empty screen,
+  //   and macOS terminals pushed every cleared screen into scrollback, so a window drag
+  //   left layers of garbled frames above the conversation
+  test("★ resize erases only the live area, never the screen or the scrollback", async () => {
     const term = fakeTerminal(120)
     const widths: number[] = []
-    const region = new LiveRegion({ output: term.stream, onResize() {
+    const region = new LiveRegion({ output: term.stream, reflows: true, onResize() {
       widths.push(region.width)
       region.set(["input", "footer"])
     } })
@@ -284,10 +287,9 @@ describe("live area", () => {
       term.resize(columns)
       await Promise.resolve()
       const output = term.all()
-      const reset = output.indexOf(`${ESC}[H${ESC}[2J`)
-      expect(reset).toBeGreaterThanOrEqual(0)
-      expect(output.slice(0, reset)).not.toMatch(/\u001b\[\d+A/)
+      expect(output).not.toContain(`${ESC}[2J`)
       expect(output).not.toContain(`${ESC}[3J`)
+      expect(output).not.toContain(`${ESC}[H`)
       expect(output).not.toContain("committed")
       expect(output).toContain("流")
       expect(output).toContain("input\nfooter")
@@ -298,6 +300,43 @@ describe("live area", () => {
     region.write(" tail\n")
     expect(term.all()).toContain("流".repeat(30) + " tail\n")
     expect(region.atLineStart).toBe(true)
+    region.close()
+  })
+
+  // ★ The one number that matters: rows from the cursor up to the frame's top, counted
+  //   the way the terminal re-wrapped them. Too few leaves a ghost, too many eats output
+  test("★ narrowing backs up by the reflowed rows: a 60-column line now takes two at 40", async () => {
+    const term = fakeTerminal(120)
+    const region = new LiveRegion({ output: term.stream, reflows: true })
+    region.set(["x".repeat(60), "a", "b"], { row: 2, col: 1 })
+    term.reset()
+    term.resize(40)
+    await Promise.resolve()
+    // from "b": two rows for the reflowed line, one for "a"
+    expect(term.all()).toContain(`\r${up(3)}${CLEAR_DOWN}`)
+    region.close()
+  })
+
+  test("the cursor's own line counts too when it wraps at the new width", async () => {
+    const term = fakeTerminal(120)
+    const region = new LiveRegion({ output: term.stream, reflows: true })
+    region.set(["top", "y".repeat(50)], { row: 1, col: 45 })
+    term.reset()
+    term.resize(30)
+    await Promise.resolve()
+    // one row for "top", one for the wrapped start of the cursor's line
+    expect(term.all()).toContain(`\r${up(2)}${CLEAR_DOWN}`)
+    region.close()
+  })
+
+  test("a terminal that truncates instead of reflowing keeps one row per line", async () => {
+    const term = fakeTerminal(120)
+    const region = new LiveRegion({ output: term.stream, reflows: false })
+    region.set(["x".repeat(60), "a", "b"], { row: 2, col: 1 })
+    term.reset()
+    term.resize(40)
+    await Promise.resolve()
+    expect(term.all()).toContain(`\r${up(2)}${CLEAR_DOWN}`)
     region.close()
   })
 
@@ -312,7 +351,9 @@ describe("live area", () => {
     term.resize(100, 30)
     await Promise.resolve()
     expect(calls).toBe(1)
-    expect(term.all().split(`${ESC}[2J`).length - 1).toBe(1)
+    // one erase for the whole burst; the repaint after it has nothing left to erase
+    expect(term.all().split(CLEAR_DOWN).length - 1).toBe(1)
+    expect(term.all()).not.toContain(`${ESC}[2J`)
     expect(term.all()).toContain("99x29\n中文")
     expect(term.all()).toContain(`${ESC}[4C`)
     term.reset()
@@ -328,8 +369,11 @@ describe("live area", () => {
     term.resize(40)
     region.write("next\n")
     await Promise.resolve()
-    expect(term.all().split(`${ESC}[2J`).length - 1).toBe(1)
-    expect(term.all().indexOf(`${ESC}[2J`)).toBeLessThan(term.all().indexOf("next"))
+    const output = term.all()
+    expect(output).not.toContain(`${ESC}[2J`)
+    // the reflow-aware erase goes out first, and nothing erases by the old ledger after it
+    expect(output.indexOf(`\r${up(2)}${CLEAR_DOWN}`)).toBe(output.indexOf(CLEAR_DOWN) - `\r${up(2)}`.length)
+    expect(output.indexOf(CLEAR_DOWN)).toBeLessThan(output.indexOf("next"))
     region.close()
   })
 
@@ -342,7 +386,9 @@ describe("live area", () => {
     await Promise.resolve()
     expect(term.all()).toBe("")
     region.resume()
-    expect(term.all()).toContain(`${ESC}[2J`)
+    // suspend already erased the frame: nothing to back up over, nothing to clear
+    expect(term.all()).not.toContain(`${ESC}[2J`)
+    expect(term.all()).toContain("box")
     term.resize(100)
     region.close()
     term.reset()

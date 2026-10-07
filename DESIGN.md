@@ -5163,6 +5163,22 @@ one per row; only past three does the summary strip appear. The old four-row bud
 three agents a summary, one name and "+2 more", hiding two of three. The budget is now
 up to six rows on a tall terminal; detail gives way first, then jobs, never the agents row.
 
+### A resize erases only the live area
+
+On resize the live area used to clear the viewport (ESC[H ESC[2J) and redraw at the top.
+That moved the input box to the top of an empty screen, and macOS Terminal and iTerm2
+push a cleared screen into scrollback, so dragging a window stacked one stale, reflowed
+copy of the frame there per resize event. Now only the live area is erased: the distance
+from the cursor to the frame's top is recomputed at the new width (each row re-wrapped
+to ceil(width / columns) rows on reflowing terminals, one row on xterm and st), then
+ESC[0J. Committed output and scrollback are never touched. The asymmetry: the arithmetic
+can be off on a terminal that moves the cursor differently during reflow (xterm.js
+leaves a row behind when the screen is full and rows below the cursor wrap), which is
+one stray row; clearing the screen damaged the whole history on the most common
+terminals. Output already in scrollback still shows the terminal's own reflow; only
+re-rendering the transcript would change that, and alfa's scrollback holds more than
+the session store can rebuild (banners, receipts, command output).
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).
