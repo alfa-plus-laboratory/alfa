@@ -97,7 +97,7 @@ const Parameters = z.object({
     .optional()
     .describe(
       'The only tools it gets, by name — e.g. ["read", "grep", "glob"] for an investigation that cannot change ' +
-        "anything. Leave it out to give it all of yours except task and ask.",
+        "anything. It always keeps message, its line back to you. Leave it out to give it all of yours except task and ask.",
     ),
   prompt: z
     .string()
