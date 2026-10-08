@@ -189,6 +189,11 @@ export const DEFAULTS: Ruleset = [
   // Listed so that "agents don't talk to each other" can be written as a deny
   { permission: "message", pattern: "*", action: "allow" },
 
+  // ── Read back this session's own history: allow ──
+  // It reads what this conversation already contained, nothing on disk or network.
+  // Listed so that turning it off has somewhere to be written
+  { permission: "recall", pattern: "*", action: "allow" },
+
   // ── Cross-cutting guards ──
   { permission: "extension", pattern: "*", action: "ask" },
 

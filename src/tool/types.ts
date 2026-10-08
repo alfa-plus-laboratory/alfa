@@ -230,6 +230,11 @@ export interface ToolContext {
    * undefined. Only the main agent's context has one (see PlanNudge in tool/todo.ts).
    */
   nudge?(toolId: string): string | undefined
+  /**
+   * This session's whole stored history, compacted parts included (see tool/recall.ts).
+   * Not wired = no store on this path.
+   */
+  history?(): import("../session/schema.ts").MessageWithParts[]
   /** Push intermediate progress to the UI (never enters the model's context). */
   onProgress(text: string): void
   /** Accumulate into this call's metadata; visible to both the UI and storage. */

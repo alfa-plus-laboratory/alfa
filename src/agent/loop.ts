@@ -94,6 +94,19 @@ export interface LoopDeps {
    * accuracy really matters, the block tells it to run git itself.
    */
   gitContext?(): string | undefined
+  /**
+   * Between two rounds of one turn (tool results in, next request not sent yet): the
+   * host's chance to compact. Returns true when it did, and the loop re-reads history.
+   *
+   * ★ Compaction used to run only at turn boundaries, so one long autonomous turn (a
+   *   ten-minute build-out, dozens of tool rounds) filled the window to 100% and died on
+   *   context overflow before the boundary came. This is the only other moment when no
+   *   call is running and no history is half written: every tool of the last round has
+   *   its result, and nothing has gone out since. Not called before the first round (the
+   *   turn boundary just had its chance) nor once the turn is settled (a compaction point
+   *   is a user message — added then, it would start a round nobody asked for).
+   */
+  between?(input: { abortSignal: AbortSignal }): Promise<boolean>
 }
 
 export interface VerifyInput {
@@ -177,7 +190,14 @@ export class Loop {
         break
       }
 
-      const history = store.listAll(input.sessionID)
+      let history = store.listAll(input.sessionID)
+      if (steps > 0 && !isSettled(history) && this.deps.between) {
+        if (await this.deps.between({ abortSignal: input.abortSignal })) history = store.listAll(input.sessionID)
+        if (input.abortSignal.aborted) {
+          interrupted = true
+          break
+        }
+      }
       if (isSettled(history)) {
         // ★ The last gate before wrapping up. What's fed back is a **synthetic** user
         //   message: the model sees it, and the UI doesn't treat it as the user's words (see

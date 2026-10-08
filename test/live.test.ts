@@ -79,8 +79,9 @@ describe("fallback mode (non-TTY)", () => {
 describe("live area", () => {
   const live = (columns = 40, rows = 24) => {
     const term = fakeTerminal(columns, rows)
-    return { term, region: new LiveRegion({ output: term.stream, enabled: true }) }
+    return { term, region: new LiveRegion({ output: term.stream, enabled: true, resizeSettleMs: 0 }) }
   }
+  const settled = () => Bun.sleep(1)
 
   test("content width leaves the last column unused", () => {
     const { region } = live(40)
@@ -265,7 +266,7 @@ describe("live area", () => {
     region.set(["box"])
     term.reset()
     term.resize(20)
-    await Promise.resolve()
+    await settled()
     expect(region.width).toBe(19)
     expect(term.chunks.length).toBeGreaterThan(0)
   })
@@ -276,7 +277,7 @@ describe("live area", () => {
   test("★ resize erases only the live area, never the screen or the scrollback", async () => {
     const term = fakeTerminal(120)
     const widths: number[] = []
-    const region = new LiveRegion({ output: term.stream, reflows: true, onResize() {
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, reflows: true, onResize() {
       widths.push(region.width)
       region.set(["input", "footer"])
     } })
@@ -285,7 +286,7 @@ describe("live area", () => {
     for (const columns of [40, 100]) {
       term.reset()
       term.resize(columns)
-      await Promise.resolve()
+      await settled()
       const output = term.all()
       expect(output).not.toContain(`${ESC}[2J`)
       expect(output).not.toContain(`${ESC}[3J`)
@@ -307,11 +308,11 @@ describe("live area", () => {
   //   the way the terminal re-wrapped them. Too few leaves a ghost, too many eats output
   test("★ narrowing backs up by the reflowed rows: a 60-column line now takes two at 40", async () => {
     const term = fakeTerminal(120)
-    const region = new LiveRegion({ output: term.stream, reflows: true })
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, reflows: true })
     region.set(["x".repeat(60), "a", "b"], { row: 2, col: 1 })
     term.reset()
     term.resize(40)
-    await Promise.resolve()
+    await settled()
     // from "b": two rows for the reflowed line, one for "a"
     expect(term.all()).toContain(`\r${up(3)}${CLEAR_DOWN}`)
     region.close()
@@ -319,11 +320,11 @@ describe("live area", () => {
 
   test("the cursor's own line counts too when it wraps at the new width", async () => {
     const term = fakeTerminal(120)
-    const region = new LiveRegion({ output: term.stream, reflows: true })
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, reflows: true })
     region.set(["top", "y".repeat(50)], { row: 1, col: 45 })
     term.reset()
     term.resize(30)
-    await Promise.resolve()
+    await settled()
     // one row for "top", one for the wrapped start of the cursor's line
     expect(term.all()).toContain(`\r${up(2)}${CLEAR_DOWN}`)
     region.close()
@@ -331,11 +332,11 @@ describe("live area", () => {
 
   test("a terminal that truncates instead of reflowing keeps one row per line", async () => {
     const term = fakeTerminal(120)
-    const region = new LiveRegion({ output: term.stream, reflows: false })
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, reflows: false })
     region.set(["x".repeat(60), "a", "b"], { row: 2, col: 1 })
     term.reset()
     term.resize(40)
-    await Promise.resolve()
+    await settled()
     expect(term.all()).toContain(`\r${up(2)}${CLEAR_DOWN}`)
     region.close()
   })
@@ -343,13 +344,13 @@ describe("live area", () => {
   test("resize bursts use the final dimensions once and redraw overlays with a CJK cursor", async () => {
     const term = fakeTerminal(120)
     let calls = 0
-    const region = new LiveRegion({ output: term.stream, onResize: () => { calls++ } })
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, onResize: () => { calls++ } })
     region.overlay((width, height) => ({ lines: [`${width}x${height}`, "中文"], cursor: { row: 1, col: 4 } }))
     term.reset()
     term.resize(40, 12)
     term.resize(60, 18)
     term.resize(100, 30)
-    await Promise.resolve()
+    await settled()
     expect(calls).toBe(1)
     // one erase for the whole burst; the repaint after it has nothing left to erase
     expect(term.all().split(CLEAR_DOWN).length - 1).toBe(1)
@@ -362,13 +363,13 @@ describe("live area", () => {
     region.close()
   })
 
-  test("output arriving before the resize microtask cannot use the stale ledger", async () => {
+  test("output arriving while a resize settles is held until the reflow-aware erase", async () => {
     const { term, region } = live(120)
     region.set(["a", "b", "c"])
     term.reset()
     term.resize(40)
     region.write("next\n")
-    await Promise.resolve()
+    await settled()
     const output = term.all()
     expect(output).not.toContain(`${ESC}[2J`)
     // the reflow-aware erase goes out first, and nothing erases by the old ledger after it
@@ -383,7 +384,7 @@ describe("live area", () => {
     region.suspend()
     term.reset()
     term.resize(80)
-    await Promise.resolve()
+    await settled()
     expect(term.all()).toBe("")
     region.resume()
     // suspend already erased the frame: nothing to back up over, nothing to clear
@@ -392,20 +393,43 @@ describe("live area", () => {
     term.resize(100)
     region.close()
     term.reset()
-    await Promise.resolve()
+    await settled()
     expect(term.all()).toBe("")
   })
 
   test("non-TTY resize emits no controls or callback", async () => {
     const term = fakeTerminal()
     let calls = 0
-    const region = new LiveRegion({ output: term.stream, enabled: false, onResize: () => { calls++ } })
+    const region = new LiveRegion({ output: term.stream, resizeSettleMs: 0, enabled: false, onResize: () => { calls++ } })
     region.write("half")
     term.resize(100)
-    await Promise.resolve()
+    await settled()
     region.close()
     expect(term.all()).toBe("half\n")
     expect(calls).toBe(0)
+  })
+
+  // ★ A drag sends a resize per frame. Painting between them wrote frames for a width the
+  //   terminal had already left; it wrapped them itself and every later erase undercounted,
+  //   leaving stacks of narrow running lines and box borders behind
+  test("★ while the size is still moving nothing is written; once it holds, one erase at the final width", async () => {
+    const term = fakeTerminal(120)
+    const region = new LiveRegion({ output: term.stream, reflows: true, resizeSettleMs: 20, onResize() { region.set(["box", "status"]) } })
+    region.set(["x".repeat(100), "status"], { row: 1, col: 0 })
+    term.reset()
+    term.resize(90)
+    region.set(["tick", "status"])
+    region.write("committed\n")
+    term.resize(50)
+    region.set(["tock", "status"])
+    expect(term.all()).toBe("")
+    await Bun.sleep(40)
+    const output = term.all()
+    // the 100-column line takes two rows at 50; nothing laid out for 90 ever went out
+    expect(output.startsWith(`${ESC}[?2026h${ESC}[?25l\r${up(2)}${CLEAR_DOWN}committed\n`)).toBe(true)
+    expect(output).not.toContain("tick")
+    expect(output).toContain("box\nstatus")
+    region.close()
   })
 
   test("passthrough redraws the live area after sending the control sequence", () => {

@@ -35,6 +35,17 @@
  * an empty screen, and macOS Terminal and iTerm2 push the cleared screen into scrollback —
  * every resize event of a window drag stacked one more copy of the old, reflowed frame
  * there, so scrolling up showed layers of garbled frames.
+ *
+ * ★ And a resize is only acted on once the size has held still (RESIZE_SETTLE_MS). A
+ * window drag sends a resize every frame; repainting after each one (the first version
+ * here, in a microtask) wrote frames laid out for a width the terminal had already left
+ * by the time the bytes arrived. The terminal then wrapped those lines itself, our cursor
+ * moves undercounted, the ledger stopped matching the screen, and each later erase left
+ * part of a frame behind: a drag across the screen left a stack of narrow, half-erased
+ * running lines and box borders. While the size moves, nothing is written — not the
+ * erase, not spinner ticks, not committed output (held and written after) — and the
+ * terminal reflows the old frame like any other text. Reflow is a function of the logical
+ * lines, so one erase computed at the final width is right however the drag got there.
  */
 import { displayWidth, truncateToWidth, wrapToWidth } from "./width.ts"
 
@@ -48,6 +59,8 @@ const SYNC_BEGIN = "\u001b[?2026h"
 const SYNC_END = "\u001b[?2026l"
 const CLEAR_DOWN = "\u001b[0J"
 const CLEAR_LINE = "\u001b[2K"
+/** How long the size must hold still before the frame is laid out again (see header) */
+const RESIZE_SETTLE_MS = 100
 
 /**
  * All the capability the renderer needs. Pulled out so the Renderer doesn't have to know
@@ -101,6 +114,8 @@ export interface LiveRegionOptions {
    * st truncate instead, nearly everything else reflows. See reflowedErase.
    */
   reflows?: boolean
+  /** Quiet time before a resize is acted on. Default RESIZE_SETTLE_MS; tests pass 0 */
+  resizeSettleMs?: number
 }
 
 export class LiveRegion {
@@ -108,6 +123,7 @@ export class LiveRegion {
   private readonly enabled: boolean
   private readonly notifyResize: (() => void) | undefined
   private readonly reflows: boolean
+  private readonly settleMs: number
 
   /** Live-area content from the caller (already wrapped to width by the caller) */
   private overlayFrame?: (width: number, height: number) => { lines: string[]; cursor?: LiveCursor }
@@ -125,12 +141,17 @@ export class LiveRegion {
   private suspended = false
   private closed = false
   private resizePending = false
+  /** Armed while the size is still moving; paints are held until it fires */
+  private settleTimer: ReturnType<typeof setTimeout> | undefined
+  /** Lines committed while a resize settles, written right after its erase */
+  private held: string[] = []
 
   constructor(options: LiveRegionOptions = {}) {
     this.output = options.output ?? process.stdout
     this.enabled = options.enabled ?? (this.output.isTTY === true)
     this.notifyResize = options.onResize
     this.reflows = options.reflows ?? terminalReflows()
+    this.settleMs = options.resizeSettleMs ?? RESIZE_SETTLE_MS
     if (this.enabled) this.output.on("resize", this.onResize)
   }
 
@@ -315,6 +336,10 @@ export class LiveRegion {
    * without this check each one is a full redraw, visible flicker on slow terminals (SSH).
    */
   private paint(committed: string[]): void {
+    if (this.settleTimer !== undefined) {
+      this.held.push(...committed)
+      return
+    }
     this.flushResize()
     const overlay = this.overlayFrame?.(this.width, this.rows - 1)
     const block = overlay ? overlay.lines.slice(0, this.rows - 1).map(line => truncateToWidth(line, this.width)) : this.buildBlock()
@@ -434,29 +459,41 @@ export class LiveRegion {
    * The terminal was resized.
    *
    * The terminal has already reflowed old content at the new width, so our recorded
-   * row count is no longer trustworthy. Coalesce a burst into one microtask, but flush
-   * before an intervening paint/suspend/close can use the invalid ledger. Resizes while
-   * suspended are remembered until resume; the temporary owner keeps its screen.
+   * row count is no longer trustworthy. Each event restarts the settle timer; until it
+   * fires, paints are held (see the ★ on settling in the file header). suspend, close and
+   * passthrough flush at once instead — they need a screen that matches the ledger now.
+   * Resizes while suspended are remembered until resume; the temporary owner keeps its
+   * screen.
    */
   private readonly onResize = (): void => {
-    if (this.closed || this.resizePending) return
+    if (this.closed) return
     this.resizePending = true
-    queueMicrotask(() => {
-      if (!this.active || !this.resizePending) return
-      this.paint([])
-    })
+    if (this.settleTimer !== undefined) clearTimeout(this.settleTimer)
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined
+      if (this.active) this.paint([])
+    }, this.settleMs)
+  }
+
+  private cancelSettle(): void {
+    if (this.settleTimer === undefined) return
+    clearTimeout(this.settleTimer)
+    this.settleTimer = undefined
   }
 
   private flushResize(): void {
+    this.cancelSettle()
     if (!this.active || !this.resizePending) return
     this.resizePending = false
     const erase = this.reflowedErase()
+    const held = this.held.map(line => line + "\n").join("")
+    this.held = []
     this.painted = []
     this.cursorRow = 0
     this.cursorCol = 0
     // ⚠ Never ED 2/3 here: see the ★ on resize in the file header. passthrough() can't be
     //   used either — it erases by the stale ledger and drops pending.
-    if (erase.length > 0) this.output.write(SYNC_BEGIN + HIDE_CURSOR + erase + SHOW_CURSOR + SYNC_END)
+    if (erase.length > 0 || held.length > 0) this.output.write(SYNC_BEGIN + HIDE_CURSOR + erase + held + SHOW_CURSOR + SYNC_END)
     this.notifyResize?.()
   }
 

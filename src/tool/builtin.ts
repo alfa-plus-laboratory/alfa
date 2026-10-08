@@ -19,6 +19,7 @@ import { JobTool } from "./job.ts"
 import { MemoryTool } from "./memory.ts"
 import { MessageTool } from "./message.ts"
 import { ReadTool } from "./read.ts"
+import { RecallTool } from "./recall.ts"
 import { SkillTool } from "./skill.ts"
 import type { ToolRegistry } from "./registry.ts"
 import { TaskTool } from "./task.ts"
@@ -53,6 +54,8 @@ export function registerBuiltins(registry: ToolRegistry): ToolRegistry {
     .register(MemoryTool)
     // Lets it check for itself how much context is left. See tool/context-window.ts
     .register(ContextTool)
+    // Reads back history a compaction folded away. See tool/recall.ts
+    .register(RecallTool)
     .register(EnvironmentTool)
     .register(SshTool)
     // Open a playbook on demand. The catalogue is in the system prompt; the body is fetched
