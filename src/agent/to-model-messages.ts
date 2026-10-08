@@ -214,8 +214,9 @@ function userContent(parts: Part[]): LLMContent[] {
 
 /**
  * Wrap the summary. **It must make three things clear**: the original messages before
- * this are gone, this is a summary and not the user's instructions, and if detail is
- * missing, go re-read it yourself.
+ * this are out of context (but recallable, see session/turns.ts), this is a summary and
+ * not the user's instructions, and if detail is missing, go look it up — recall for what
+ * was said, a fresh read for what is on disk.
  *
  * Without the last one, the model treats a coarse-grained summary as complete fact and
  * carries on — which shows up as it editing files from memory after a compaction.
@@ -223,14 +224,16 @@ function userContent(parts: Part[]): LLMContent[] {
 function compactionText(summary: string): string {
   return [
     "This session was compacted to free up context. Everything before this point has been replaced by the",
-    "handoff summary below — the original messages are no longer available to you.",
+    "handoff summary below. The original messages are out of your context but still stored: the HISTORY INDEX at",
+    "the end of the summary lists them by turn, and the recall tool reads a turn back or searches them.",
     "",
     "<session-summary>",
     summary,
     "</session-summary>",
     "",
-    "Continue from here. The summary is a summary: whenever you need detail it does not cover — exact file",
-    "contents, command output, line numbers — read the files or run the commands again rather than recalling them.",
+    "Continue from here. The summary is a summary: whenever you need detail it does not cover, look it up rather",
+    "than recalling it from memory. What was said, decided or seen earlier: recall it. What is on disk now — file",
+    "contents, line numbers, command output: read the files or run the commands again, since they may have changed.",
   ].join("\n")
 }
 

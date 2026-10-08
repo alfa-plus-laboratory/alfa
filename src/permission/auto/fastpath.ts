@@ -55,7 +55,7 @@ import { isProtectedPath } from "./protected.ts"
 import { isSecretPath } from "./secrets.ts"
 
 /** Touch nothing on disk or the network beyond alfa's own state */
-const INTERNAL = new Set(["todo", "memory", "context", "environment", "ask", "task", "message"])
+const INTERNAL = new Set(["todo", "memory", "context", "environment", "ask", "task", "message", "recall"])
 
 /**
  * The pattern is a regex / glob, not a path. The files grep then opens come back

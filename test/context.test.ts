@@ -440,12 +440,16 @@ describe("compaction point", () => {
     expect(flat).toContain("接着干")
   })
 
-  test("the summary goes in as user and says the original text is gone", () => {
+  // The originals used to be gone for the model; now they are out of context but stored,
+  // and it must be told both halves — "gone" makes it guess, "still here" makes it think
+  // it can see them
+  test("the summary goes in as user, says the originals left the context, and names recall", () => {
     const messages = toLLMMessages([compacted("摘要正文"), said("继续")])
     expect(messages[0]!.role).toBe("user")
     const text = JSON.stringify(messages[0])
     expect(text).toContain("<session-summary>")
-    expect(text).toContain("no longer available")
+    expect(text).toContain("out of your context")
+    expect(text).toContain("recall tool")
   })
 
   test("after two compactions only the last counts — the earlier summary is already inside the new one", () => {

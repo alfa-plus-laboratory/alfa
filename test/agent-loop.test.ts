@@ -42,6 +42,7 @@ function harness(
     verify?: (input: { touched: string[]; abortSignal: AbortSignal }) => Promise<string | undefined>
     memory?: () => { text: string; notes: number } | undefined
     gitContext?: () => string | undefined
+    between?: (input: { abortSignal: AbortSignal }) => Promise<boolean>
   } = {},
 ) {
   const store = new Store(":memory:")
@@ -73,6 +74,7 @@ function harness(
     ...(options.verify ? { verify: options.verify } : {}),
     ...(options.memory ? { memory: options.memory } : {}),
     ...(options.gitContext ? { gitContext: options.gitContext } : {}),
+    ...(options.between ? { between: options.between } : {}),
     stream(request) {
       requests.push(request)
       const entry = script[Math.min(requests.length - 1, script.length - 1)]!
@@ -550,6 +552,51 @@ const userTexts = (request: LLMRequest): string[] =>
     .filter((m) => m.role === "user")
     .flatMap((m) => (m.role === "user" ? m.content : []))
     .map((c) => (c.type === "text" ? c.text : ""))
+
+// ★ Compaction used to wait for the turn boundary, and one long turn reached 100% and died
+//   on overflow first. The gap between rounds is the other safe point
+describe("Compacting between rounds", () => {
+  test("offered only between two rounds of a running turn — not before the first, not once settled", async () => {
+    const calls: number[] = []
+    const h = harness([callTool("c1", "tool-calls"), callTool("c2", "tool-calls"), say("done")], {
+      between: async () => { calls.push(h.requests.length); return false },
+    })
+    try {
+      await h.loop.run({ sessionID: h.sessionID, model: MODEL, text: "go", abortSignal: new AbortController().signal })
+      // after round 1 and after round 2; none before round 1, none after the final answer
+      expect(calls).toEqual([1, 2])
+    } finally { h.store.close() }
+  })
+
+  test("★ what the hook wrote is in the very next request, and the turn carries on from it", async () => {
+    const h = harness([callTool("c1", "tool-calls"), say("done")], {
+      between: async () => {
+        const id = newMessageID()
+        h.store.upsertMessage({ id, sessionID: h.sessionID, role: "user", timeCreated: Date.now() })
+        h.store.upsertPart({ id: newPartID(), sessionID: h.sessionID, messageID: id, timeCreated: Date.now(), type: "compact", text: "SUMMARY", folded: 2, tokensBefore: 1 })
+        return true
+      },
+    })
+    try {
+      const result = await h.loop.run({ sessionID: h.sessionID, model: MODEL, text: "go", abortSignal: new AbortController().signal })
+      expect(result.steps).toBe(2)
+      expect(JSON.stringify(h.requests[1]!.messages)).toContain("SUMMARY")
+      expect(isSettled(h.store.listAll(h.sessionID))).toBe(true)
+    } finally { h.store.close() }
+  })
+
+  test("esc during the hook stops the turn without another request", async () => {
+    const controller = new AbortController()
+    const h = harness([callTool("c1", "tool-calls"), say("done")], {
+      between: async () => { controller.abort(); return false },
+    })
+    try {
+      const result = await h.loop.run({ sessionID: h.sessionID, model: MODEL, text: "go", abortSignal: controller.signal })
+      expect(result.interrupted).toBe(true)
+      expect(h.requests.length).toBe(1)
+    } finally { h.store.close() }
+  })
+})
 
 describe("Verification before wrapping up", () => {
   test("★ after editing files it verifies before wrapping up, and keeps working if problems are found", async () => {

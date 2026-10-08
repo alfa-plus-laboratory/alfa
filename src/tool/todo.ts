@@ -146,7 +146,7 @@ export const TodoTool: ToolDef<Args> = {
     // dedicated metadata field it falls back to the output's first line); the lines after
     // it are for the model to check itself against
     const head = `plan: ${done}/${items.length} done${active ? ` · now: ${active.text}` : ""}`
-    const body = items.map((item) => `${mark(item.status)} ${item.text}`)
+    const body = planLines(items)
     return {
       output: [head, ...body].join("\n"),
       title: `${done}/${items.length}`,
@@ -178,6 +178,11 @@ function normalize(items: readonly { text: string; status: TodoStatus }[]): Todo
     out.push({ text: text.length > MAX_TEXT ? text.slice(0, MAX_TEXT - 1) + "…" : text, status })
   }
   return out
+}
+
+/** The list as the model reads it in todo's result; a mid-turn compaction hands it back the same way */
+export function planLines(items: readonly TodoItem[]): string[] {
+  return items.map((item) => `${mark(item.status)} ${item.text}`)
 }
 
 function mark(status: TodoStatus): string {

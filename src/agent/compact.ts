@@ -22,6 +22,7 @@ import type { CompactPart, MessageWithParts } from "../session/schema.ts"
 import type { Store } from "../session/store.ts"
 import { estimateTokens, IMAGE_TOKENS } from "./context.ts"
 import { liveHistory } from "./to-model-messages.ts"
+import { splitTurns, turnLine } from "../session/turns.ts"
 
 /**
  * Reading the full session can take minutes; a timeout must report command failure
@@ -64,6 +65,13 @@ const MIN_FOLD = 4
 
 /** Max number of changed files to list */
 const MAX_FILES = 40
+/**
+ * Max index lines. Past it the oldest turns after the first few go unlisted (still
+ * searchable); a session of hundreds of turns would otherwise spend thousands of tokens
+ * on an index read once in a while
+ */
+const MAX_INDEX = 60
+const INDEX_HEAD = 10
 
 export interface CompactResult {
   /** The handoff note. Empty string on failure */
@@ -244,7 +252,8 @@ export function createCompactor(options: CompactOptions): CompactFn {
       // ★ Changed files are **pinned to the end by the program**, not left to the model to
       //   retell. It leaving out a path raises no error, and from then on nobody knows that
       //   file was touched — the most expensive kind of compaction failure
-      return { ...outcome, text: withFileLedger(text, live.slice(0, cut)) }
+      const tail = new Set(live.slice(cut).map(entry => entry.info.id))
+      return { ...outcome, text: withHistoryIndex(withFileLedger(text, live.slice(0, cut)), history, tail) }
     } catch (error) {
       // The user pressing esc looks the same as a timeout, but means something completely
       // different to them
@@ -344,6 +353,34 @@ export function withFileLedger(summary: string, folded: MessageWithParts[]): str
     "FILES CHANGED (recorded from the tool log, not written by the summarizer)",
     ...shown.map((path) => `- ${path}`),
     ...(more > 0 ? [`- …and ${more} more`] : []),
+  ].join("\n")
+}
+
+/**
+ * Pin an index of every folded turn to the end of the handoff note — this compaction's
+ * fold and every earlier one's, since the earlier summary that listed those is folded now
+ * too.
+ *
+ * ★ Written by the program, like the file ledger, and for the same reason: the summary
+ *   decides what to say, the index guarantees the rest can still be found (see
+ *   session/turns.ts). Turn numbers are stable, so `recall` resolves them however many
+ *   compactions later.
+ */
+export function withHistoryIndex(summary: string, history: MessageWithParts[], kept: ReadonlySet<string>): string {
+  const turns = splitTurns(history).filter(turn => turn.messages.some(message => !kept.has(message.info.id)))
+  if (turns.length === 0) return summary
+  const lines = turns.length <= MAX_INDEX
+    ? turns.map(turnLine)
+    : [
+        ...turns.slice(0, INDEX_HEAD).map(turnLine),
+        `(turns ${turns[INDEX_HEAD]!.number}–${turns[turns.length - (MAX_INDEX - INDEX_HEAD) - 1]!.number} not listed; recall with a query searches them)`,
+        ...turns.slice(-(MAX_INDEX - INDEX_HEAD)).map(turnLine),
+      ]
+  return [
+    summary,
+    "",
+    "HISTORY INDEX (recorded by the program; the original messages of these turns are still stored — recall reads a turn back in full, or searches them all)",
+    ...lines.map(line => `- ${line}`),
   ].join("\n")
 }
 
@@ -535,6 +572,11 @@ export function applyCompaction(
   sessionID: string,
   summary: string,
   stats: { folded: number; tokensBefore: number; keptFrom?: string },
+  /**
+   * Set when compacting between two rounds of a turn still in progress (see midTurnNote):
+   * goes into the same message as a synthetic text, after the summary.
+   */
+  note?: string,
 ): CompactPart {
   const now = Date.now()
   const messageID = newMessageID()
@@ -551,8 +593,33 @@ export function applyCompaction(
     ...(stats.keptFrom !== undefined ? { keptFrom: stats.keptFrom } : {}),
   }
   store.upsertPart(part)
+  if (note !== undefined) {
+    store.upsertPart({ id: newPartID(), sessionID, messageID, timeCreated: now + 1, type: "text", text: note, synthetic: true })
+  }
   store.touchSession(sessionID)
   return part
+}
+
+/**
+ * What follows the summary when the compaction lands in the middle of a turn.
+ *
+ * ★ Without it the model wakes up to a summary and nothing after it, which reads like a
+ *   fresh session waiting for instructions: it recaps, or asks what to do, and the turn
+ *   the user left running ends there. The summary's own request is usually folded too —
+ *   a long turn rarely fits the verbatim tail — so the user's words go along verbatim:
+ *   GOAL is the summarizer's paraphrase, and a paraphrase is what drifts. The plan goes
+ *   along for the same reason.
+ */
+export function midTurnNote(history: MessageWithParts[], plan: readonly string[] = []): string {
+  const request = lastUserText(history).trim()
+  return [
+    "This compaction happened in the middle of your work on the user's last request; the user has not said anything since.",
+    "Carry on from NEXT in the summary: no recap, no asking whether to continue.",
+    ...(request.length > 0 ? ["", "The user's last request, verbatim:", "<request>", clip(request, MAX_TEXT), "</request>"] : []),
+    // The todo call that set the plan is folded with everything else; without the list the
+    // model would start a second plan or stop tracking, and the pinned row would follow it
+    ...(plan.length > 0 ? ["", "Your plan as it stood (keep updating it with todo):", ...plan] : []),
+  ].join("\n")
 }
 
 // ─────────────────────────────────────────────── Misc
@@ -569,7 +636,7 @@ export function clean(text: string): string {
   return out.trim()
 }
 
-function lastUserText(history: MessageWithParts[]): string {
+export function lastUserText(history: MessageWithParts[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i]!
     if (entry.info.role !== "user") continue

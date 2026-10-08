@@ -38,7 +38,7 @@ import { homedir } from "node:os"
 import { basename, join, relative, resolve, isAbsolute } from "node:path"
 import { parseArgs } from "node:util"
 import { checkReminder, detectChecker, runCheck, worthChecking } from "../agent/check.ts"
-import { applyCompaction, createCompactor, type CompactFn, type CompactResult } from "../agent/compact.ts"
+import { applyCompaction, createCompactor, midTurnNote, type CompactFn, type CompactResult } from "../agent/compact.ts"
 import { ContextMeter, contextReport, type ContextReport, type ContextSnapshot } from "../agent/context.ts"
 import { Emitter, type UIEvent } from "../agent/events.ts"
 import { isSettled, Loop, type Attachment } from "../agent/loop.ts"
@@ -159,7 +159,7 @@ import { footerLines } from "./footer.ts"
 import { pinnedRows } from "./pinned.ts"
 import { latestPlan } from "./plan.ts"
 import { Tips } from "./tips.ts"
-import { parseTodos, PlanNudge, type TodoItem } from "../tool/todo.ts"
+import { parseTodos, planLines, PlanNudge, type TodoItem } from "../tool/todo.ts"
 import { aggregateCacheDiagnostics } from "../llm/cache/index.ts"
 import { displayWidth, padToWidth } from "./width.ts"
 import { brandMark, clearInteractiveViewport } from "./brand.ts"
@@ -1078,6 +1078,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           ? () => {}
           : (callID, text) => ui.preview(toolNames.get(callID) ?? "running", text),
         onMetadata: () => {},
+        // recall's source: this session's whole record, compacted turns included. Read live
+        // — the turn in progress is part of what it may look up
+        history: () => store.listAll(sessionID),
         // The same object as the catalogue in system; see the star above
         skills: () => visibleSkills(),
         // The tool the model uses to look at its own context (see tool/context-window.ts).
@@ -1274,9 +1277,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const processJobs = (): readonly JobSnapshot[] => listJobs()
   const agentJobs = (): readonly JobSnapshot[] => subagents.list()
 
+  /**
+   * Compaction between the rounds of a long turn (see LoopDeps.between). Bound once the
+   * interactive deps exist; -p runs have none and keep the turn-boundary path only.
+   */
+  let betweenRounds: (() => Promise<boolean>) | undefined
+  // ⚠ One try per turn: a compaction that failed (or found too little to fold) would
+  //   otherwise be retried before every remaining round, a summarizer request each time
+  let midTurnSpent = false
   const loop = new Loop({
     store,
     emitter,
+    between: () => betweenRounds?.() ?? Promise.resolve(false),
     verify: async ({ touched, abortSignal }) => {
       if (!checker || checkOff) return undefined
       if (!worthChecking(checker, touched)) return undefined
@@ -1455,6 +1467,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const runTurn = async (text?: string): Promise<TurnOutcome> => {
+    midTurnSpent = false
     // The interactive box already did this on paste (ShellDeps.pasteText); -p and piped
     // input arrive here with the data: URL still in them
     if (text !== undefined) text = saveDataImages(text, join(dataDir(), "clipboard"))
@@ -1966,6 +1979,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   keyboard.onHangup = () => {
     const forced = new Promise<void>((resolve) => setTimeout(resolve, HANGUP_SHUTDOWN_MS).unref?.())
     void Promise.race([shutdown(), forced]).finally(() => process.exit(0))
+  }
+  betweenRounds = async () => {
+    if (midTurnSpent || !deps.autoCompact() || deps.meter.snapshot.ratio < AUTO_COMPACT_AT) return false
+    const compacted = await runCompaction(deps, { auto: true, midTurn: true })
+    if (!compacted) midTurnSpent = true
+    return compacted
   }
   const deps: InteractiveDeps = {
     runner, runTurn, renderer, region, session, cwd, root, ui,
@@ -4075,15 +4094,17 @@ const AUTO_COMPACT_AT = 0.9
 /**
  * A turn finished; see whether to compact on our own.
  *
- * ── Why **between turns**, not the moment it gets nearly full ──
+ * ── Here first, and between rounds only as the fallback ──
  * Compaction rewrites nothing in the store, but it moves where the model's history
  * starts: it appends a compaction point, and from then on everything before it — bar
  * whole turns kept verbatim (CompactPart.keptFrom) — reaches the model only as the
- * summary. Drop that point mid-run and, unless the turn in progress fits the verbatim
- * tail, the first half of the model's current tool loop is folded into prose while the
- * rest is still being written after the point; and the summary itself was written from
- * calls still running. The turn boundary is the only moment when "the history is
- * complete and nobody is reading it".
+ * summary. At the turn boundary the history is complete and nobody is reading it, so
+ * this is where it should happen. What was wrong was making it the *only* place: one long
+ * autonomous turn reached 100% and failed on overflow before its boundary came. So the
+ * loop also offers the gap between two rounds (betweenRounds, LoopDeps.between): never
+ * mid-call — every tool of the last round has its result — but the turn in progress is
+ * then usually folded too, which is why that path hands the model the user's request and
+ * its plan verbatim (midTurnNote in agent/compact.ts).
  *
  * ── No compaction after an interrupt ──
  * The user just pressed esc; what they want is to **stop**. Automatically running
@@ -4312,43 +4333,46 @@ function autoCompactCommand(arg: string, deps: InteractiveDeps): void {
  * write it once for each and sooner or later you get an error like "manual compaction
  * cleared the ledger, automatic didn't", which only surfaces in long sessions.
  */
-async function runCompaction(deps: InteractiveDeps, options: { focus?: string; auto?: boolean } = {}): Promise<void> {
+async function runCompaction(deps: InteractiveDeps, options: { focus?: string; auto?: boolean; midTurn?: boolean } = {}): Promise<boolean> {
   const history = deps.store.listAll(deps.session.id)
   const foldable = history.length - compactionIndex(history)
   if (foldable < COMPACT_MIN_MESSAGES) {
     // Stay quiet on the automatic path: the user pressed no key, and "nothing worth
     // compacting" isn't something they need to know
     if (!options.auto) deps.reply(theme.dim(`  ${t.compactNothing}`))
-    return
+    return false
   }
 
   const before = deps.meter.snapshot.used
-  deps.setBusy(true)
+  // Mid-turn the turn already holds busy; dropping it here would show an idle box while
+  // the turn carries on
+  if (!options.midTurn) deps.setBusy(true)
   deps.reply(theme.dim(`  ${options.auto ? t.compactingAuto : t.compacting}`))
   let result: CompactResult
   try {
     result = await deps.compact(history, options.focus)
   } finally {
-    deps.setBusy(false)
+    if (!options.midTurn) deps.setBusy(false)
   }
 
   if (result.failed || result.text.length === 0) {
     const why = t.compactFailed(result.failed ?? "empty summary")
     deps.receipt(theme.red(`  ✗ ${why}`), "bad", why)
-    return
+    return false
   }
 
   applyCompaction(deps.store, deps.session.id, result.text, {
     folded: result.folded,
     tokensBefore: before,
     ...(result.keptFrom ? { keptFrom: result.keptFrom } : {}),
-  })
+  }, options.midTurn ? midTurnNote(history, planLines(deps.plan.items)) : undefined)
   // The reported number is from the request **before** compaction and no longer counts.
   // Without clearing it, the gauge would stay frozen — right at the moment the user is
   // staring at it
   deps.meter.drop()
-  // The pinned plan follows what the model is sent: folded away → gone, kept tail → stays
-  deps.plan.items = latestPlan(deps.store.listAll(deps.session.id))
+  // The pinned plan follows what the model is sent: folded away → gone, kept tail → stays.
+  // Mid-turn the note hands the plan back, so it stays pinned
+  if (!options.midTurn) deps.plan.items = latestPlan(deps.store.listAll(deps.session.id))
   // The folded history includes those read outputs. Handoff notes often say "next: change
   // X to Y in foo.ts", and without clearing the ledger it would act on that line directly
   // — while it no longer has foo.ts in hand
@@ -4365,6 +4389,7 @@ async function runCompaction(deps: InteractiveDeps, options: { focus?: string; a
   // compaction (possible in a session piled with tens of MB of output), it says so again
   // on the spot — which is exactly what the user needs to know
   deps.settleContext()
+  return true
 }
 
 /**

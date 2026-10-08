@@ -5502,3 +5502,31 @@ through compaction and seeded from history on resume, the figure `/context` brea
 now sits after the cache rate as `1.2M tokens`. It says `tokens`, not `tok`, so it can't
 be read as the speed next to it, and on a narrow screen it gives way right after the
 speed: it informs, the percentage and cache rate drive decisions.
+
+### Compaction also runs between the rounds of a long turn
+
+Auto-compaction ran only at turn boundaries, on the argument that the boundary is the
+one moment the history is complete and nobody is reading it. A live run showed what that
+costs: one autonomous turn (a ten-minute build-out, dozens of tool rounds) reached 100%
+and failed on context overflow before its boundary ever came. The loop now also offers the
+gap between two rounds (`LoopDeps.between`): every tool of the last round has its result
+and nothing has gone out since, so no call is cut. The turn in progress is then usually
+folded too — it rarely fits the verbatim tail — so the compaction point carries a
+synthetic note: carry on, no recap; the user's request verbatim (GOAL is a paraphrase);
+and the plan as it stood, which also stays pinned. One try per turn: a failed compaction
+retried before every round would be a summarizer call per round. The boundary stays the
+first choice; between rounds only when the window crosses AUTO_COMPACT_AT mid-turn.
+
+### What compaction folds can be read back
+
+The summary is lossy by design, and the loss used to be final for the model: the
+originals stayed in the store, but only `/resume` showed them, to the user. Now each
+compaction pins a HISTORY INDEX to its summary — one line per folded turn, written by
+the program like the file ledger — and the `recall` tool reads a turn back in full
+(paged) or searches every turn for pieces holding all the words of a query. The unit is
+the turn (a user message and everything up to the next), numbered across the whole
+session; history is append-only, so a number in the third compaction's index still
+finds the same turn. The criterion for what goes where: the summary carries what the next
+step needs, the index guarantees the rest can be found, and recall pays for detail only
+when it's asked for. No semantic search: the words the model remembers — a file name, an
+error code — are usually the ones it needs, and a miss is said plainly.
