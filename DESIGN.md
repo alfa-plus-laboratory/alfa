@@ -5191,6 +5191,24 @@ stored that way, so history stays append-only. The screen strips it (`withoutNud
 The asymmetry: a few dozen tokens and an occasional extra todo call, against a plan row
 the user can't trust.
 
+### A resize is drawn once the size holds still
+
+The reflow-aware erase was right for one resize and wrong for a drag. A window drag
+resizes the terminal faster than it parses our output, so the frame sent after one resize
+was parsed at the next width: its erase fell short and its lines wrapped where the ledger
+counted one row each. Dragging a Konsole window stacked a dozen input-box top borders
+above the box. Now nothing at all goes out until the size has held still for 100 ms.
+Spinner ticks, keystrokes and streamed text are held, and committed lines go out ahead of
+the next frame. Reflow keeps logical lines, so one erase computed at the final width is
+exact. Before each frame the size is also re-read synchronously (`_refreshSize`), because
+the terminal may already have reflowed while its SIGWINCH still waits behind the running
+task. A reply streaming as a drag began left one ghost row that way. Konsole also gets its
+own reflow model: it re-wraps only the lines above the cursor and clamps the cursor into
+its own row. Counting the cursor's row as the other terminals do backed up one row too far
+whenever the cursor sat past the new width. The asymmetry: a 100 ms pause before the box
+re-lays out after a drag, against ghost rows that stay on screen for the rest of the
+session.
+
 ## Third-party code
 
 This project is released under the **Apache License 2.0** (see `LICENSE`).
