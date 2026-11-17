@@ -321,6 +321,61 @@ export function splitAtWidth(text: string, columns: number): [string, string] {
 }
 
 /**
+ * Word-wrap one line that may carry colors; every row after the first starts with
+ * `hang`, whose width counts against the row.
+ *
+ * For the model's reply, which is wrapped once, on commit, with a hanging indent (see
+ * Renderer.hung). A row breaks after a space, which is dropped, or beside a double-width
+ * character: CJK has no spaces and may break between any two characters. A run with no
+ * break in it wider than a row (a URL, a path) is cut by column, as wrapToWidth does.
+ * Colors carry across a break the way splitAtWidth carries them.
+ */
+export function wrapHanging(text: string, width: number, hang = ""): string[] {
+  if (width < 1 || displayWidth(text) <= width) return [text]
+  const rows: string[] = []
+  let rest = text
+  let prefix = ""
+  for (;;) {
+    const room = Math.max(1, width - displayWidth(prefix))
+    if (displayWidth(rest) <= room) {
+      rows.push(prefix + rest)
+      break
+    }
+    // On the first row the marker the hang lines up under ("• ", "  │ ") is no place to
+    // break: the row would hold the bullet alone
+    const [head, tail] = splitAtWidth(rest, breakColumn(stripAnsi(rest), room, prefix ? 0 : displayWidth(hang)))
+    rows.push(prefix + head.replace(TRAILING_SPACES, "$1"))
+    rest = tail.replace(LEADING_SPACES, "$1")
+    if (stripAnsi(rest).length === 0) break
+    prefix = hang
+  }
+  return rows
+}
+
+const TRAILING_SPACES = / +((?:\u001b\[[0-9;]*m)*)$/
+const LEADING_SPACES = /^((?:\u001b\[[0-9;]*m)*) +/
+
+/** Column of the last break opportunity that fits in `room`; see wrapHanging. */
+function breakColumn(plain: string, room: number, after: number): number {
+  let column = 0
+  let best = 0
+  let text = false
+  let wide = false
+  for (const char of plain) {
+    const w = charWidth(char)
+    const space = char === " "
+    // A space breaks before itself; a wide character on either side of the gap breaks
+    // it. Leading indentation is not a break: that row would hold nothing but spaces
+    if (column > after && text && (space || wide || w === 2)) best = column
+    if (column + w > room) return best > 0 ? best : Math.max(column, w)
+    column += w
+    if (!space) text = true
+    wide = w === 2
+  }
+  return column
+}
+
+/**
  * Right-pad with spaces to the given display width. Too wide is not truncated —
  * truncation is for the caller to decide explicitly.
  */

@@ -17,6 +17,7 @@ import {
   splitAtWidth,
   stripAnsi,
   truncateToWidth,
+  wrapHanging,
   wrapToWidth,
 } from "../src/cli/width.ts"
 
@@ -193,6 +194,43 @@ describe("splitAtWidth", () => {
   test("edge cases", () => {
     expect(splitAtWidth("abc", 0)).toEqual(["", "abc"])
     expect(splitAtWidth("abc", 99)).toEqual(["abc", ""])
+  })
+})
+
+describe("wrapHanging", () => {
+  test("breaks at spaces, drops the space at the break, and hangs every later row", () => {
+    expect(wrapHanging("the quick brown fox jumps", 10, "  ")).toEqual(["the quick", "  brown", "  fox", "  jumps"])
+  })
+
+  test("CJK breaks between any two characters, and beside a word it touches", () => {
+    expect(wrapHanging("窗口缩放的问题已经修好", 8)).toEqual(["窗口缩放", "的问题已", "经修好"])
+    expect(wrapHanging("修好了resize问题", 10)).toEqual(["修好了", "resize问题"])
+  })
+
+  test("a run with nowhere to break is cut by column, like the terminal would", () => {
+    expect(wrapHanging("see https://example.com/a/b/c", 12)).toEqual(["see", "https://exam", "ple.com/a/b/", "c"])
+  })
+
+  // A bullet alone on its row, with the item's first word under it, reads as two items
+  test("★ the first row never breaks inside the marker the hang lines up under", () => {
+    const rows = wrapHanging("• https://example.com/very/long", 12, "  ")
+    expect(rows[0]).toBe("• https://ex")
+    expect(rows.every(row => displayWidth(row) <= 12)).toBe(true)
+  })
+
+  test("color carries across a break and every row is closed off", () => {
+    const rows = wrapHanging(`${RED}alpha beta gamma${RESET}`, 11, "  ")
+    expect(rows.map(stripAnsi)).toEqual(["alpha beta", "  gamma"])
+    expect(rows[0]).toEndWith(RESET)
+    expect(rows[1]).toBe(`  ${RED}gamma${RESET}`)
+  })
+
+  test("never wider than the width, and a line that fits comes back untouched", () => {
+    const text = "Resize 测试 paragraph number 1. This sentence is deliberately long, 中文混排也要正确。"
+    for (const width of [5, 9, 17, 33]) {
+      for (const row of wrapHanging(text, width, "   ")) expect(displayWidth(row)).toBeLessThanOrEqual(width)
+    }
+    expect(wrapHanging("fits", 4, "  ")).toEqual(["fits"])
   })
 })
 

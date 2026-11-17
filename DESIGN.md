@@ -670,13 +670,15 @@ left gutter **and highlighting by fence language**, and **tables with aligned co
 Rendering is streamed: a line is finalized as soon as it's complete, and the unfinished half
 line is redrawn every frame from its current content — `**bo` isn't bold, `**bold**` is.
 
-Finished lines go to the terminal as logical lines, and the terminal wraps them: no hanging
-indent, and the code block's bar doesn't carry down a wrapped line. Only the unfinished half
-line in the live area is wrapped by us, at the current width. What's already in the
-scrollback is the terminal's; on a resize it reflows only as far as the terminal itself does
-that. (The full-screen UI wrapped at draw time, with a hanging indent to the content's
-starting column and the bars carried down every continuation line, and reflowed the whole
-history when the window was resized or a sidebar collapsed.)
+In an interactive terminal the reply is word-wrapped by us as each line is committed, at
+the current width, and hung two columns in under `◆ alfa`: list items hang under their
+text, and code-block and quote bars carry down every wrapped row. The unfinished half line
+in the live area is wrapped the same way, so nothing jumps on commit. What's already in the
+scrollback keeps the width it was printed at; after narrowing the window the terminal
+re-wraps each of those rows on its own (see "The reply hangs under its signature" in
+Status). Pipes and `-p` get raw logical lines. (The full-screen UI wrapped at draw time
+too, and re-laid out the whole history when the window was resized or a sidebar
+collapsed.)
 
 When output goes into a pipe it's all turned off (same rule as color), and `--no-markdown`
 is the explicit escape hatch.
@@ -5190,6 +5192,38 @@ the turn whose tool calls are still open. Appended as the result is produced, it
 stored that way, so history stays append-only. The screen strips it (`withoutNudge`).
 The asymmetry: a few dozen tokens and an occasional extra todo call, against a plan row
 the user can't trust.
+
+### A resize is drawn once the size holds still
+
+The reflow-aware erase was right for one resize and wrong for a drag. A window drag
+resizes the terminal faster than it parses our output, so the frame sent after one resize
+was parsed at the next width: its erase fell short and its lines wrapped where the ledger
+counted one row each. Dragging a Konsole window stacked a dozen input-box top borders
+above the box. Now nothing at all goes out until the size has held still for 100 ms.
+Spinner ticks, keystrokes and streamed text are held, and committed lines go out ahead of
+the next frame. Reflow keeps logical lines, so one erase computed at the final width is
+exact. Before each frame the size is also re-read synchronously (`_refreshSize`), because
+the terminal may already have reflowed while its SIGWINCH still waits behind the running
+task. A reply streaming as a drag began left one ghost row that way. Konsole also gets its
+own reflow model: it re-wraps only the lines above the cursor and clamps the cursor into
+its own row. Counting the cursor's row as the other terminals do backed up one row too far
+whenever the cursor sat past the new width. The asymmetry: a 100 ms pause before the box
+re-lays out after a drag, against ghost rows that stay on screen for the rest of the
+session.
+
+### The reply hangs under its signature
+
+Committed reply lines used to go to the terminal unwrapped, so that the scrollback reflowed
+on resize. Every wrapped row then started at column 0, so the reply had no left edge under
+`◆ alfa` while tool lines and receipts sat two columns in, and users found the body text
+odd. The reply is now word-wrapped on commit (`wrapHanging`) and hung two columns in.
+Lists hang under their text, and code and quote bars carry down (`hangOf`, read off the
+rendered markers). This reverses the earlier choice deliberately: a terminal can't hang a
+soft-wrapped row, so a left edge means wrapping ourselves. Only a first-row indent would
+have kept reflow, and was offered and declined. The asymmetry: every reply reads as one
+block at the width it was printed at, against old replies turning ragged after the window
+is narrowed. Widening leaves them narrow but intact, and the new width applies from the
+next line.
 
 ## Third-party code
 

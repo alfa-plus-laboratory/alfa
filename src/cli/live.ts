@@ -35,8 +35,18 @@
  * an empty screen, and macOS Terminal and iTerm2 push the cleared screen into scrollback —
  * every resize event of a window drag stacked one more copy of the old, reflowed frame
  * there, so scrolling up showed layers of garbled frames.
+ *
+ * ★ And nothing goes out until the size has held still for RESIZE_SETTLE_MS. Tried
+ * before: erasing and redrawing on the first microtask after each resize. A window drag
+ * resizes the terminal faster than it parses our output, so a frame computed for one
+ * width was parsed at the next. Its erase then fell short of the rows that width had
+ * reflowed, and its lines wrapped where the ledger counted one row each. Every step left
+ * part of the old frame behind, and on Konsole a single drag stacked a dozen input-box
+ * top borders. Reflow keeps logical lines, so a frame left alone through a whole drag
+ * ends up laid out by the final width only, and one erase computed at that width is
+ * exact. Committed lines that arrive meanwhile are held and go out with the next frame.
  */
-import { displayWidth, truncateToWidth, wrapToWidth } from "./width.ts"
+import { displayWidth, stripAnsi, truncateToWidth, wrapToWidth } from "./width.ts"
 
 const HIDE_CURSOR = "\u001b[?25l"
 const SHOW_CURSOR = "\u001b[?25h"
@@ -48,6 +58,22 @@ const SYNC_BEGIN = "\u001b[?2026h"
 const SYNC_END = "\u001b[?2026l"
 const CLEAR_DOWN = "\u001b[0J"
 const CLEAR_LINE = "\u001b[2K"
+/**
+ * How long the size must hold still before the frame is redrawn (see the second ★ in the
+ * file header). A drag delivers a resize every frame or two, well under this, so the
+ * delay only shows once the drag stops. ⚠ Shorter than the gap between drag events and
+ * the race comes back. Nothing errors when that happens; ghost rows just pile up.
+ */
+const RESIZE_SETTLE_MS = 100
+
+/**
+ * How the terminal re-lays out what is already on screen when its width changes:
+ * - "lines": every wrapped line is re-wrapped, the cursor's own included (most terminals)
+ * - "above-cursor": only lines above the cursor are re-wrapped, trailing blanks ignored,
+ *   and the cursor is clamped into the last column on its own row (Konsole)
+ * - "none": lines are cut at the right edge (xterm, st)
+ */
+export type Reflow = "lines" | "above-cursor" | "none"
 
 /**
  * All the capability the renderer needs. Pulled out so the Renderer doesn't have to know
@@ -96,18 +122,18 @@ export interface LiveRegionOptions {
    * everything out again at the new width, so this has to call back out.
    */
   onResize?(): void
-  /**
-   * Does this terminal reflow wrapped lines when it narrows? Default: detected — xterm and
-   * st truncate instead, nearly everything else reflows. See reflowedErase.
-   */
-  reflows?: boolean
+  /** How this terminal reflows on a width change. Default: detected, see detectReflow. */
+  reflow?: Reflow
+  /** Tests shorten this. See RESIZE_SETTLE_MS. */
+  resizeSettleMs?: number
 }
 
 export class LiveRegion {
   private readonly output: NodeJS.WriteStream
   private readonly enabled: boolean
   private readonly notifyResize: (() => void) | undefined
-  private readonly reflows: boolean
+  private readonly reflow: Reflow
+  private readonly settleMs: number
 
   /** Live-area content from the caller (already wrapped to width by the caller) */
   private overlayFrame?: (width: number, height: number) => { lines: string[]; cursor?: LiveCursor }
@@ -125,12 +151,16 @@ export class LiveRegion {
   private suspended = false
   private closed = false
   private resizePending = false
+  private resizeTimer: ReturnType<typeof setTimeout> | undefined
+  /** Lines committed while a resize settles; they go out in front of the next frame */
+  private held: string[] = []
 
   constructor(options: LiveRegionOptions = {}) {
     this.output = options.output ?? process.stdout
     this.enabled = options.enabled ?? (this.output.isTTY === true)
     this.notifyResize = options.onResize
-    this.reflows = options.reflows ?? terminalReflows()
+    this.reflow = options.reflow ?? detectReflow()
+    this.settleMs = options.resizeSettleMs ?? RESIZE_SETTLE_MS
     if (this.enabled) this.output.on("resize", this.onResize)
   }
 
@@ -276,6 +306,9 @@ export class LiveRegion {
   resume(): void {
     if (!this.enabled || !this.suspended) return
     this.suspended = false
+    // A resize while suspended is applied now: the timer that would have settled it may
+    // already have fired and found the screen not ours
+    this.flushResize()
     this.paint([])
   }
 
@@ -315,7 +348,22 @@ export class LiveRegion {
    * without this check each one is a full redraw, visible flicker on slow terminals (SSH).
    */
   private paint(committed: string[]): void {
-    this.flushResize()
+    // ★ The terminal may already have resized and reflowed while its SIGWINCH still waits
+    //   behind this task. A frame sent now would be parsed at the new width against the
+    //   old ledger; a reply streaming as a drag began left one ghost row this way.
+    //   _refreshSize (Node's and Bun's tty streams; absent on fakes and pipes) re-reads
+    //   the size and emits "resize" synchronously if it changed, silently if not.
+    this.refreshSize()
+    // ★ While a resize settles, nothing goes out, not even a cursor move: anything sent
+    //   now may be parsed at a width the next resize has already replaced
+    if (this.resizePending) {
+      this.held.push(...committed)
+      return
+    }
+    if (this.held.length > 0) {
+      committed = [...this.held, ...committed]
+      this.held = []
+    }
     const overlay = this.overlayFrame?.(this.width, this.rows - 1)
     const block = overlay ? overlay.lines.slice(0, this.rows - 1).map(line => truncateToWidth(line, this.width)) : this.buildBlock()
     const target = overlay ? { row: Math.min(Math.max(0, block.length - 1), overlay.cursor?.row ?? Math.max(0, block.length - 1)), col: Math.min(this.width, overlay.cursor?.col ?? 0) } : this.cursorTarget(block)
@@ -434,20 +482,34 @@ export class LiveRegion {
    * The terminal was resized.
    *
    * The terminal has already reflowed old content at the new width, so our recorded
-   * row count is no longer trustworthy. Coalesce a burst into one microtask, but flush
-   * before an intervening paint/suspend/close can use the invalid ledger. Resizes while
-   * suspended are remembered until resume; the temporary owner keeps its screen.
+   * row count is no longer trustworthy. Every resize restarts the settle timer; paints
+   * meanwhile are held (see paint). suspend/close/passthrough flush at once, since they
+   * erase next. Resizes while suspended are remembered until resume; the temporary owner
+   * keeps its screen.
    */
   private readonly onResize = (): void => {
-    if (this.closed || this.resizePending) return
+    if (this.closed) return
     this.resizePending = true
-    queueMicrotask(() => {
-      if (!this.active || !this.resizePending) return
-      this.paint([])
-    })
+    if (this.resizeTimer !== undefined) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = undefined
+      // A resize still queued behind this timer re-arms it instead of being drawn over
+      this.refreshSize()
+      if (this.resizeTimer !== undefined || !this.active) return
+      this.flushResize()
+    }, this.settleMs)
   }
 
+  private refreshSize(): void {
+    ;(this.output as { _refreshSize?: () => void })._refreshSize?.()
+  }
+
+  /** Apply a pending resize: erase the reflowed frame, let the owner lay out, repaint. */
   private flushResize(): void {
+    if (this.resizeTimer !== undefined) {
+      clearTimeout(this.resizeTimer)
+      this.resizeTimer = undefined
+    }
     if (!this.active || !this.resizePending) return
     this.resizePending = false
     const erase = this.reflowedErase()
@@ -458,6 +520,9 @@ export class LiveRegion {
     //   used either — it erases by the stale ledger and drops pending.
     if (erase.length > 0) this.output.write(SYNC_BEGIN + HIDE_CURSOR + erase + SHOW_CURSOR + SYNC_END)
     this.notifyResize?.()
+    // The owner may not repaint (a picker holds the keyboard), and held lines must still
+    // go out before a suspend or close erases what follows them
+    this.paint([])
   }
 
   /**
@@ -469,8 +534,10 @@ export class LiveRegion {
    * row is those rows summed above the cursor plus the wrapped rows before the cursor's
    * column. Widening needs no special case: nothing of ours was soft-wrapped, so every
    * line stays one row. A terminal that truncates instead keeps one row per line.
+   * Konsole re-wraps only the lines above the cursor, measured without trailing blanks,
+   * and clamps the cursor into its own unwrapped row (Screen::resizeImage).
    * ⚠ Overshooting erases committed output still on screen and undershooting leaves a
-   *   ghost frame; both are permanent, which is why the two terminal kinds are told apart.
+   *   ghost frame; both are permanent, which is why the terminal kinds are told apart.
    * ⚠ Checked against xterm.js 5.5 (VS Code's terminal): it carries the cursor along its
    *   line too, except when the screen is full and lines *below* the cursor also wrap —
    *   then its cursor lands that many rows low and one narrowing step can leave a row of
@@ -480,10 +547,15 @@ export class LiveRegion {
   private reflowedErase(): string {
     if (this.painted.length === 0) return ""
     const columns = this.columns
-    const rowsOf = (line: string) => this.reflows ? Math.max(1, Math.ceil(displayWidth(line) / columns)) : 1
+    const reflow = this.reflow
+    const rowsOf = (line: string) => {
+      if (reflow === "none") return 1
+      const width = reflow === "above-cursor" ? displayWidth(stripAnsi(line).trimEnd()) : displayWidth(line)
+      return Math.max(1, Math.ceil(width / columns))
+    }
     let up = 0
     for (let row = 0; row < this.cursorRow; row++) up += rowsOf(this.painted[row] ?? "")
-    if (this.reflows) up += Math.floor(this.cursorCol / columns)
+    if (reflow === "lines") up += Math.floor(this.cursorCol / columns)
     return "\r" + (up > 0 ? `\u001b[${up}A` : "") + CLEAR_DOWN
   }
 }
@@ -503,12 +575,15 @@ function sameLines(a: string[], b: string[]): boolean {
 }
 
 /**
- * xterm and st cut a line at the right edge when the window narrows; the terminals
- * people mostly use (macOS Terminal, iTerm2, kitty, WezTerm, Alacritty, GNOME/Konsole,
- * Windows Terminal, tmux) re-wrap it. Both tell on themselves in the environment.
+ * xterm and st cut a line at the right edge when the window narrows; Konsole re-wraps
+ * only what is above the cursor; the rest people mostly use (macOS Terminal, iTerm2,
+ * kitty, WezTerm, Alacritty, GNOME Terminal, Windows Terminal, tmux) re-wrap everything.
+ * Each tells on itself in the environment. tmux goes first: inside it, tmux is the
+ * terminal, whatever window it runs in (and KONSOLE_VERSION leaks into the tmux server).
  */
-function terminalReflows(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env["TMUX"]) return true
-  if (env["XTERM_VERSION"]) return false
-  return !/^st(-|$)/.test(env["TERM"] ?? "")
+export function detectReflow(env: NodeJS.ProcessEnv = process.env): Reflow {
+  if (env["TMUX"]) return "lines"
+  if (env["KONSOLE_VERSION"]) return "above-cursor"
+  if (env["XTERM_VERSION"]) return "none"
+  return /^st(-|$)/.test(env["TERM"] ?? "") ? "none" : "lines"
 }
