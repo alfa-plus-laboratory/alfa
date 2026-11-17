@@ -22,11 +22,11 @@
 import { redact } from "../util/redact.ts"
 import { theme } from "./theme.ts"
 import type { OutputSink } from "./live.ts"
-import { MarkdownStream } from "./markdown.ts"
+import { hangOf, MarkdownStream } from "./markdown.ts"
 import { planChanges, planRows } from "./plan.ts"
 import type { UIEvent } from "../agent/events.ts"
 import { t, uiText } from "../i18n/index.ts"
-import { padToWidth, splitAtWidth, stripAnsi, wrapToWidth } from "./width.ts"
+import { padToWidth, splitAtWidth, stripAnsi, wrapHanging, wrapToWidth } from "./width.ts"
 import { terminalText } from "./terminal-text.ts"
 import type { ReasoningPart, ToolPart } from "../session/schema.ts"
 import type { Tokens } from "../llm/types.ts"
@@ -330,7 +330,32 @@ export class Renderer {
       return
     }
     this.md.push(delta)
-    this.sink.replaceTail!(this.md.drain(), this.md.preview())
+    const tail = this.md.preview()
+    this.sink.replaceTail!(this.hung(this.md.drain()), tail ? this.hung(tail.split("\n")).join("\n") : "")
+  }
+
+  /**
+   * The reply's lines, wrapped at the current width and hung two columns in, under the
+   * `◆ alfa` signature and level with the tool and receipt lines.
+   *
+   * ── Why we wrap instead of the terminal ──
+   * Lines used to go to the scrollback unwrapped, and the terminal wrapped them: every
+   * wrapped row of a paragraph started at column 0, so the reply had no left edge of its
+   * own, and a terminal can't hang a soft-wrapped row. The cost, chosen knowingly: a
+   * committed reply keeps the width it was printed at, so after narrowing the window the
+   * terminal re-wraps each of our rows on its own and old replies come out ragged.
+   * Widening leaves them narrow and readable.
+   *
+   * The half line in the live area goes through this too, so a row doesn't jump when it
+   * is committed. Only with speaker labels (an interactive terminal): pipes and -p keep
+   * raw logical lines for whatever reads them.
+   */
+  private hung(lines: string[]): string[] {
+    if (!this.speakers) return lines
+    const width = Math.max(1, this.width() - BODY_INDENT.length)
+    return lines.flatMap(line => stripAnsi(line).length === 0
+      ? [line]
+      : wrapHanging(line, width, hangOf(line)).map(row => BODY_INDENT + row))
   }
 
   /**
@@ -343,7 +368,7 @@ export class Renderer {
    */
   private flushText(): void {
     if (!this.md || this.md.idle) return
-    this.sink.replaceTail!(this.md.end(), "")
+    this.sink.replaceTail!(this.hung(this.md.end()), "")
   }
 
   newlineIfNeeded(): void {
@@ -366,6 +391,8 @@ export class Renderer {
  * you can tell at a glance who's talking.
  */
 const AGENT_MARK = "◆"
+/** How far the reply sits in from the signature; see Renderer.hung */
+const BODY_INDENT = "  "
 /**
  * The bar to the left of the user's text. Live turns and replayed history (replay.ts)
  * both draw it through userLines — "what you said" must look the same whether it was

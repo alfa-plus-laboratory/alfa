@@ -20,16 +20,17 @@
  * so the user can see it growing and doesn't think things are stuck.
  *
  * ── What it doesn't do ──
- * No wrapping. What comes out of here are **logical lines**; wrapping is left to whoever
- * shows them — in the scrollback that's the terminal itself, which reflows them when the
- * window changes (the live area only wraps the unfinished half line, see live.ts). Wrap
- * them for good here and history would stay frozen at the old width forever. That's also
- * why this doesn't need to know the terminal width: table column widths come from
- * content, and the rule line has a fixed length.
+ * No wrapping. What comes out of here are **logical lines**, and this never needs the
+ * terminal width: table column widths come from content, and the rule line has a fixed
+ * length. The Renderer wraps them on commit, with a hanging indent under `◆ alfa`
+ * (Renderer.hung); hangOf below says what each wrapped row of a line starts with, since
+ * only this file knows its markers. Until then they went to the terminal unwrapped and
+ * it reflowed them on every resize, but wrapped rows came back at column 0, under
+ * nothing. History now stays at the width it was printed at; see Renderer.hung.
  */
 import { Highlighter, languageFor } from "./highlight.ts"
 import { theme } from "./theme.ts"
-import { displayWidth, truncateToWidth } from "./width.ts"
+import { displayWidth, stripAnsi, truncateToWidth } from "./width.ts"
 
 /**
  * Bullet for each list level. No distinction past four levels — nesting that deep
@@ -219,6 +220,26 @@ export class MarkdownStream {
 }
 
 // ───────────────────────────────────────────── blocks
+
+const QUOTE_BARS = /^(?:│ )+/
+const LIST_MARKER = new RegExp(`^ *(?:[${BULLETS.join("")}☐☑]|\\d{1,9}[.)]) `)
+
+/**
+ * What every wrapped row of a rendered line starts with: a code block's gutter and a
+ * quote's bars carry down, so the block reads as one; a list item hangs under its text,
+ * not its bullet; anything else wraps flush with its first row.
+ * ⚠ Read off the rendered text, so it has to match what renderLine and feed emit. A new
+ *   block style that doesn't get a case here still wraps, just flush left.
+ */
+export function hangOf(line: string): string {
+  const plain = stripAnsi(line)
+  if (plain.startsWith(CODE_GUTTER)) return theme.dim(CODE_GUTTER)
+  const bars = QUOTE_BARS.exec(plain)
+  if (bars) return theme.dim(bars[0])
+  const marker = LIST_MARKER.exec(plain)
+  if (marker) return " ".repeat(displayWidth(marker[0]))
+  return ""
+}
 
 /**
  * Render one line (fence toggles and tables excluded) into one line. Pure function;

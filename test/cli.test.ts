@@ -18,7 +18,7 @@ import { Shell } from "../src/cli/shell.ts"
 import { setColorEnabled } from "../src/cli/theme.ts"
 import type { PromptRequest } from "../src/permission/gate.ts"
 import type { Key } from "../src/cli/keys.ts"
-import { stripAnsi } from "../src/cli/width.ts"
+import { displayWidth, stripAnsi } from "../src/cli/width.ts"
 import type { ToolPart } from "../src/session/schema.ts"
 import type { UIEvent } from "../src/agent/events.ts"
 import { terminalText } from "../src/cli/terminal-text.ts"
@@ -629,6 +629,49 @@ describe("★ Renderer markdown channel", () => {
     const renderer = new Renderer({ sink: out, root: "/repo" })
     renderer.handle({ type: "part.delta", part: textPart, delta: "# 标题\n" })
     expect(out.committed()).toEqual(["# 标题"])
+  })
+
+  // With speaker labels the reply is wrapped here, hung two columns in under `◆ alfa`.
+  // The terminal's own wrap brought every wrapped row back to column 0, under nothing
+  const spoken = (deltas: string[], width: number) => {
+    const out = mdSink()
+    const renderer = new Renderer({ sink: out, root: "/repo", markdown: true, speakers: true, width: () => width })
+    renderer.handle({ type: "message.start", message: {} as never })
+    for (const delta of deltas) renderer.handle({ type: "part.delta", part: textPart, delta })
+    return { out, renderer }
+  }
+
+  test("★ a spoken reply hangs two columns in on every row, wrapped at the width", () => {
+    const { out, renderer } = spoken(["窗口缩放的问题已经修好了，根因是拖拽时终端改尺寸太快。\n"], 24)
+    renderer.handle({ type: "part.end", part: textPart })
+    const body = out.committed().slice(out.committed().indexOf("◆ alfa") + 1)
+    expect(body).toEqual(["  窗口缩放的问题已经修好", "  了，根因是拖拽时终端改", "  尺寸太快。"])
+    expect(body.every(row => displayWidth(row) <= 24)).toBe(true)
+  })
+
+  test("list items hang under their text; code and quote bars carry down", () => {
+    const { out, renderer } = spoken(["- first item wraps here\n\n> quoted words wrap too\n\n```\nconst value = compute(a, b)\n```\n"], 20)
+    renderer.handle({ type: "part.end", part: textPart })
+    const body = out.committed().slice(out.committed().indexOf("◆ alfa") + 1).filter(row => row.length > 0)
+    expect(body).toEqual([
+      "  • first item wraps",
+      "    here",
+      "  │ quoted words",
+      "  │ wrap too",
+      "    │ const value =",
+      "    │ compute(a, b)",
+    ])
+  })
+
+  test("★ the live half line is hung the same way, so a row doesn't jump when committed", () => {
+    const { out } = spoken(["the half line keeps going"], 16)
+    expect(out.tail()).toBe("  the half line\n  keeps going")
+  })
+
+  test("without speaker labels (pipes, -p) lines stay unwrapped and flush left", () => {
+    const { out, renderer } = feed(["a line much longer than any width we would wrap at\n"])
+    renderer.handle({ type: "part.end", part: textPart })
+    expect(out.committed()).toEqual(["a line much longer than any width we would wrap at"])
   })
 
   test("reasoning skips markdown and is never appended to the body's partial line", () => {

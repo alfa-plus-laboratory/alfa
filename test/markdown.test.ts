@@ -13,7 +13,7 @@
  *     in the middle of ` ** `, of a fence, or of a table is routine.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { MarkdownStream, renderInline, renderLine } from "../src/cli/markdown.ts"
+import { hangOf, MarkdownStream, renderInline, renderLine } from "../src/cli/markdown.ts"
 import { colorEnabled, setColorEnabled, theme } from "../src/cli/theme.ts"
 import { displayWidth, stripAnsi } from "../src/cli/width.ts"
 
@@ -354,5 +354,26 @@ describe("misc", () => {
 
   test("empty input produces nothing", () => {
     expect(render("")).toEqual([])
+  })
+})
+
+// hangOf reads markers off rendered text. Change a bullet or the code gutter without it and
+// wrapped rows quietly fall back to flush left
+describe("hangOf matches what the renderer emits", () => {
+  test("list items of every kind hang under their text", () => {
+    expect(hangOf(renderLine("- item"))).toBe("  ")
+    expect(hangOf(renderLine("    - deep item"))).toBe("      ")
+    expect(hangOf(renderLine("12. ordered"))).toBe("    ")
+    expect(hangOf(renderLine("- [x] done"))).toBe("  ")
+  })
+
+  test("code gutters and quote bars carry down; plain text and tables don't hang", () => {
+    const md = new MarkdownStream()
+    md.push("```\nx = 1\n```\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+    const [code, table] = md.end()
+    expect(plain(hangOf(code!))).toBe("  │ ")
+    expect(hangOf(table!)).toBe("")
+    expect(plain(hangOf(renderLine("> > nested")))).toBe("│ │ ")
+    expect(hangOf(renderLine("just text"))).toBe("")
   })
 })
