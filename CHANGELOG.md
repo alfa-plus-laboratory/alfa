@@ -2,6 +2,21 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.19.0
+
+**Dragging the window no longer garbles the screen, and the reply sits under its
+signature.**
+
+- Resizing the terminal window by dragging it no longer leaves stray rows of the old
+  input box behind (on Konsole, a stack of `────` lines above the box). While the size
+  is changing nothing is redrawn; the box is laid out once, at the final width, about a
+  tenth of a second after you let go. A reply streaming during the drag keeps its place.
+- The model's reply is indented two columns under `◆ alfa`, on every row, level with the
+  tool lines and the `✻ worked` receipt. Lines break between words (and anywhere in CJK
+  text), list items wrap under their text, and code blocks and quotes keep their bar on
+  every wrapped row. A reply keeps the width it was printed at: after narrowing the
+  window, earlier replies re-wrap raggedly; new ones use the new width.
+
 ## 0.18.0
 
 **The plan row says which step is running, and a plan the model forgets to update gets
