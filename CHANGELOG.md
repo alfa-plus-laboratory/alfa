@@ -2,6 +2,14 @@
 
 User-visible changes per release, starting with 0.12.20.
 
+## 0.19.1
+
+**A model picked from `/model` is remembered.**
+
+- Choosing a model on the screen that bare `/model` opens now saves it as the default,
+  like `/model <provider>/<model>` always did; before, the next launch went back to the
+  old one. If `$ALFA_MODEL` is set it still wins at startup, and the screen now says so.
+
 ## 0.19.0
 
 **Dragging the window no longer garbles the screen, and the reply sits under its

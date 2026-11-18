@@ -64,7 +64,7 @@ test("settings discovers through saved credentials and saves without switching o
   let reloads = 0
   const host: SettingsHost = {
     state: () => ({ model: "fixture/old", classifier: undefined, limit: { context: 64000, output: 4000 }, sandbox: true, permission: "default", trust: "trusted", interface: "en", reply: "auto", check: false, thinking: false, agentflow: false, autoCompact: true, theme: "terminal", toolOutput: "compact", animation: "on", reasoning: "preview" }),
-    models: () => ["fixture/old"], reload: () => { reloads++ }, switch: spec => { switched.push(spec); return undefined },
+    models: () => ["fixture/old"], reload: () => { reloads++ }, switch: spec => { switched.push(spec); return undefined }, rememberBlockedBy: () => undefined,
     async command() {}, setClassifier() { return undefined }, setLimit() {}, appearance() {}, access: { list: () => [], add() {}, async revoke() {} },
   }
   await settings(form(["add-model", "fixture", "model:new-a", "save"]), host, "model")
