@@ -8,7 +8,7 @@ import { InputCancelled } from "../src/cli/secret-input.ts"
 
 const state = (): SettingsState => ({ sandbox: true, limit: { context: 128000, output: 8192 }, model: "local/test", classifier: undefined, permission: "default", trust: "trusted", interface: "zh", reply: "auto", check: true, thinking: false, agentflow: 4, autoCompact: true, theme: "terminal", toolOutput: "compact", animation: "on", reasoning: "preview" })
 function host(commands: string[], current = state()): SettingsHost {
-  return { setLimit(limit) { current.limit = limit }, state: () => current, models: () => [current.model], command: async text => { commands.push(text); if (text === "/think on") current.thinking = true }, reload() {}, switch() { return undefined }, setClassifier(spec) { current.classifier = spec; return undefined }, appearance() {}, access: { list: () => [], add() {}, async revoke() {} } }
+  return { setLimit(limit) { current.limit = limit }, state: () => current, models: () => [current.model], command: async text => { commands.push(text); if (text === "/think on") current.thinking = true }, reload() {}, switch() { return undefined }, rememberBlockedBy: () => undefined, setClassifier(spec) { current.classifier = spec; return undefined }, appearance() {}, access: { list: () => [], add() {}, async revoke() {} } }
 }
 
 test("opening or cancelling settings triggers no check, compaction or toggle change", async () => {
