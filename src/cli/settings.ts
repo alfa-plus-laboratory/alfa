@@ -45,7 +45,10 @@ export interface SettingsState {
 export interface SettingsHost {
   command(text: string): Promise<unknown>
   reload(): void
+  /** Switches **and saves it as the default**; a returned sentence = not switched */
   switch(spec: string): string | undefined
+  /** The env variable that overrides the saved model at startup, if set */
+  rememberBlockedBy(): string | undefined
   /** A returned sentence = not changed. undefined = same as the conversation's model */
   setClassifier(spec: string | undefined): string | undefined
   state(): SettingsState
@@ -104,7 +107,16 @@ export async function settings(form: Form, host: SettingsHost, page?: string): P
         else if (model === "add-model") await providers(form, host, true)
         else if (model !== "back") {
           const spec = model === "manual" ? (await form.ask(tr("provider/model", "provider/model", "provider/model"))).trim() : model
-          if (spec) { const error = host.switch(spec); if (error) form.say(error); else form.say(tr(`Active model: ${spec}`, `当前模型：${spec}`, `現在のモデル: ${spec}`)) }
+          if (spec) {
+            const error = host.switch(spec)
+            if (error) form.say(error)
+            else {
+              form.say(tr(`Active model: ${spec}`, `当前模型：${spec}`, `現在のモデル: ${spec}`))
+              // Saying nothing here is how "it switched back next launch" goes unexplained
+              const blocked = host.rememberBlockedBy()
+              if (blocked) form.say(tr(`Not saved as default: $${blocked} is set and wins at startup.`, `未保存为默认：已设置 $${blocked}，启动时以它为准。`, `既定として保存されません：$${blocked} が設定されており起動時に優先されます。`))
+            }
+          }
         }
       } else if (choice === "classifier") {
         const items = host.models().map(value => entry(value, value, value === s.classifier ? tr("Current classifier", "当前分类器", "現在の分類器") : undefined))

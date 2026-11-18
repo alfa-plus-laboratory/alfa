@@ -4603,7 +4603,15 @@ async function boxed(deps: InteractiveDeps, keyboard: Keyboard): Promise<number>
       await settings(form, {
           command: text => slashCommand(text, deps, done),
           reload: () => deps.models.reload(),
-          switch: spec => deps.models.switch(spec, false),
+          // ⚠ Must remember, the same as `/model <spec>`. Bare `/model` opens this screen,
+          //   so it is where most switches happen; it once passed remember=false, and the
+          //   pick silently reverted on the next launch with nothing on screen to say so
+          switch: spec => {
+            const failure = deps.models.switch(spec)
+            if (!failure) deps.settleContext()
+            return failure
+          },
+          rememberBlockedBy: () => deps.models.rememberBlockedBy(),
           setClassifier: spec => deps.models.setClassifier(spec),
           models: () => deps.models.choices(),
           setLimit: limit => deps.models.setLimit(limit),
